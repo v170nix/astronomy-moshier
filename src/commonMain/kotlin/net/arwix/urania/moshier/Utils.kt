@@ -1,17 +1,16 @@
 package net.arwix.urania.moshier
 
-import net.arwix.urania.core.*
 import net.arwix.urania.core.calendar.JT
-import net.arwix.urania.core.calendar.MJD
 import net.arwix.urania.core.calendar.times
-import net.arwix.urania.core.calendar.toJT
 import net.arwix.urania.core.kepler.KeplerElementsObject
 import net.arwix.urania.core.kepler.getSimonJ2000KeplerElements
 import net.arwix.urania.core.math.ARCSEC_TO_RAD
-import net.arwix.urania.core.math.JD_2000
 import net.arwix.urania.core.math.JULIAN_DAYS_PER_CENTURY
+import net.arwix.urania.core.math.angle.Radian
 import net.arwix.urania.core.math.angle.rad
+import net.arwix.urania.core.math.angle.times
 import net.arwix.urania.core.math.mod3600
+import net.arwix.urania.core.math.vector.SphericalVector
 import kotlin.math.abs
 import kotlin.math.cos
 import kotlin.math.sin
@@ -24,7 +23,7 @@ import kotlin.math.sin
  * @param arg
  * @param n
  */
-private fun sscc(k: Int, arg: Double, n: Int, ss: Array<DoubleArray>, cc: Array<DoubleArray>) {
+private inline fun sscc(k: Int, arg: Double, n: Int, ss: Array<DoubleArray>, cc: Array<DoubleArray>) {
     var cv: Double
     var sv: Double
     var s: Double
@@ -36,24 +35,14 @@ private fun sscc(k: Int, arg: Double, n: Int, ss: Array<DoubleArray>, cc: Array<
     cv = cu * cu - su * su
     ss[k][1] = sv /* sin(2L) */
     cc[k][1] = cv
-    var i = 2
-    while (i < n) {
+
+    for (i in 2 until n) {
         s = su * cv + cu * sv
         cv = cu * cv - su * sv
         sv = s
         ss[k][i] = sv /* sin( i+1 L ) */
         cc[k][i] = cv
-        i++
     }
-//
-//    for (i in 2 until n) {
-//        s = su * cv + cu * sv
-//        cv = cu * cv - su * sv
-//        sv = s
-//        ss[k][i] = sv /* sin( i+1 L ) */
-//        cc[k][i] = cv
-//        i++
-//    }
 }
 
 /**
@@ -61,18 +50,15 @@ private fun sscc(k: Int, arg: Double, n: Int, ss: Array<DoubleArray>, cc: Array<
  * variables (e.g., longitude, latitude, radius) of the same list of
  * arguments.
  *
- * @param J Julian day.
+ * @param tt
  * @param arg_tbl
  * @param distance
  * @param lat_tbl
  * @param lon_tbl
  * @param rad_tbl
  * @param max_harmonic
- * @param max_power_of_t
- * @param maxargs
  * @param timescale
- * @param trunclvl
- * @return An array with x, y, z (AU).
+ * @return SphericalVector r (AU).
  */
 internal fun gplan(
     tt: JT,
@@ -82,40 +68,158 @@ internal fun gplan(
     lon_tbl: DoubleArray,
     rad_tbl: DoubleArray,
     max_harmonic: IntArray,
-    max_power_of_t: Int,
-    maxargs: Int,
-    timescale: Double,
-    trunclvl: Double
-): DoubleArray {
-    var i: Int
+    timescale: Double
+): SphericalVector {
+
     var j: Int
     var k: Int
     var m: Int
-    var k1: Int
-    var ip: Int
     var np: Int
-    var nt: Int
-    val p: IntArray
-    val pl: DoubleArray
-    val pb: DoubleArray
-    val pr: DoubleArray
     var su: Double
     var cu: Double
-    var sv: Double
-    var cv: Double
-    val T: Double
-    var t: Double
-    var sl: Double
-    var sb: Double
-    var sr: Double
-    T = (tt * JULIAN_DAYS_PER_CENTURY) / timescale
+    var buffer: Double
 
-    /* From Simon et al (1994) */
-    val freqs = doubleArrayOf( /* Arc sec per 10000 Julian years. */
+    if (distance == 0.0) {
+        throw IllegalArgumentException()
+    }
+
+    val jT100: Double = (tt * JULIAN_DAYS_PER_CENTURY) / timescale
+
+    /* Calculate sin( i*MM ), etc. for needed multiple angles. */
+    val ss = Array(20) { DoubleArray(41) }
+    val cc = Array(20) { DoubleArray(41) }
+
+    for (i in 0 until 9) {
+        if (max_harmonic[i] > 0) {
+            buffer = ((freqs[i] * jT100).mod3600() + phases[i]) * ARCSEC_TO_RAD
+            sscc(i, buffer, max_harmonic[i], ss, cc)
+        }
+    }
+
+    var pIndex = -1
+    var plIndex = -1
+    var pbIndex = -1
+    var prIndex = -1
+    var count: Int
+    var accumulator: Double
+    var isFirst: Boolean
+    val arrayAccumulator = doubleArrayOf(0.0, 0.0)
+
+    val vector = SphericalVector.Zero
+
+    while (true) {
+
+        np = arg_tbl[++pIndex]
+        if (np < 0) break
+        if (np == 0) {
+
+            /* It is a polynomial term. */
+            count = arg_tbl[++pIndex]
+
+            /* "Longitude" polynomial (phi). */
+            accumulator = lon_tbl[++plIndex]
+            for (i in (0 until count)) {
+                accumulator = accumulator * jT100 + lon_tbl[++plIndex]
+            }
+            vector.phi += accumulator.mod3600().rad
+
+
+            /* "Latitude" polynomial (theta). */
+            accumulator = lat_tbl[++pbIndex]
+            for (i in (0 until count)) {
+                accumulator = accumulator * jT100 + lat_tbl[++pbIndex]
+            }
+            vector.theta += accumulator.rad
+
+            /* Radius polynomial (psi). */
+            accumulator = rad_tbl[++prIndex]
+            for (i in (0 until count)) {
+                accumulator = accumulator * jT100 + rad_tbl[++prIndex]
+            }
+            vector.r += accumulator
+            continue
+        }
+
+
+        isFirst = true
+
+        for (i in (0 until np)) {
+            /* What harmonic. */
+            j = arg_tbl[++pIndex]
+            /* Which planet. */
+            m = arg_tbl[++pIndex] - 1
+            if (j != 0) {
+                k = abs(j) - 1
+                su = ss[m][k] /* sin(k*angle) */
+                if (j < 0) su = -su
+                cu = cc[m][k]
+                if (isFirst) { /* set first angle */
+                    arrayAccumulator[0] = su
+                    arrayAccumulator[1] = cu
+                    isFirst = false
+                } else { /* combine angles */
+                    buffer = su * arrayAccumulator[1] + cu * arrayAccumulator[0]
+                    arrayAccumulator[1] = cu * arrayAccumulator[1] - su * arrayAccumulator[0]
+                    arrayAccumulator[0] = buffer
+                }
+            }
+        }
+        val (sv, cv) = arrayAccumulator
+
+        /* Highest power of T. */
+        count = arg_tbl[++pIndex]
+
+        /* Longitude. */
+
+        arrayAccumulator[0] = lon_tbl[++plIndex]
+        arrayAccumulator[1] = lon_tbl[++plIndex]
+        for (i in (0 until count)) {
+            arrayAccumulator[0] = arrayAccumulator[0] * jT100 + lon_tbl[++plIndex]
+            arrayAccumulator[1] = arrayAccumulator[1] * jT100 + lon_tbl[++plIndex]
+        }
+        vector.phi += arrayAccumulator.let { it[0] * cv + it[1] * sv }.rad
+
+        /* Latitude. */
+        arrayAccumulator[0] = lat_tbl[++pbIndex]
+        arrayAccumulator[1] = lat_tbl[++pbIndex]
+        for (i in (0 until count)) {
+            arrayAccumulator[0] = arrayAccumulator[0] * jT100 + lat_tbl[++pbIndex]
+            arrayAccumulator[1] = arrayAccumulator[1] * jT100 + lat_tbl[++pbIndex]
+        }
+        vector.theta += arrayAccumulator.let { it[0] * cv + it[1] * sv }.rad
+
+        /* Radius. */
+        arrayAccumulator[0] = rad_tbl[++prIndex]
+        arrayAccumulator[1] = rad_tbl[++prIndex]
+        for (i in (0 until count)) {
+            arrayAccumulator[0] = arrayAccumulator[0] * jT100 + rad_tbl[++prIndex]
+            arrayAccumulator[1] = arrayAccumulator[1] * jT100 + rad_tbl[++prIndex]
+        }
+        vector.r += arrayAccumulator.let { it[0] * cv + it[1] * sv }
+    }
+
+//    if (distance == 0.0) return doubleArrayOf(
+//        (ARCSEC_TO_RAD * vector.phi).rad.normalize().value,
+//        (ARCSEC_TO_RAD * vector.theta).rad.normalize().value,
+//        (ARCSEC_TO_RAD * vector.r).rad.normalize().value
+//    )
+
+    vector.phi *= ARCSEC_TO_RAD
+    vector.theta *= ARCSEC_TO_RAD
+    vector.r = distance * (1.0 + vector.r * ARCSEC_TO_RAD)
+
+    return vector
+}
+
+/* From Simon et al (1994) */
+private val freqs  by lazy {
+    doubleArrayOf( /* Arc sec per 10000 Julian years. */
         53810162868.8982, 21066413643.3548, 12959774228.3429, 6890507749.3988, 1092566037.7991, 439960985.5372,
         154248119.3933, 78655032.0744, 52272245.1795
     )
-    val phases = doubleArrayOf( /* Arc sec. */
+}
+private val phases by lazy {
+    doubleArrayOf( /* Arc sec. */
         252.25090552 * 3600.0,
         181.97980085 * 3600.0,
         100.46645683 * 3600.0,
@@ -126,469 +230,252 @@ internal fun gplan(
         304.34866548 * 3600.0,
         860492.1546
     )
-
-    /* Calculate sin( i*MM ), etc. for needed multiple angles. */
-    val ss = Array(20) { DoubleArray(41) }
-    val cc = Array(20) { DoubleArray(41) }
-    i = 0
-    while (i < 9) {
-        if (max_harmonic[i] > 0) {
-            sr = ((freqs[i] * T).mod3600() + phases[i]) * ARCSEC_TO_RAD
-            sscc(i, sr, max_harmonic[i], ss, cc)
-        }
-        i++
-    }
-
-    /* Point to start of table of arguments. */
-    p = arg_tbl
-
-    /* Point to tabulated cosine and sine amplitudes. */
-    pl = lon_tbl
-    pb = lat_tbl
-    pr = rad_tbl
-    sl = 0.0
-    sb = 0.0
-    sr = 0.0
-    np = 0
-    nt = 0
-    cu = 0.0
-    var p_index = -1
-    var pl_index = -1
-    var pb_index = -1
-    var pr_index = -1
-    while (true) {
-
-        /* argument of sine and cosine */
-        /* Number of periodic arguments. */
-        p_index++
-        np = p[p_index]
-        if (np < 0) break
-        if (np == 0) { /* It is a polynomial term. */
-            p_index++
-            nt = p[p_index]
-            /* "Longitude" polynomial (phi). */
-            pl_index++
-            cu = pl[pl_index]
-            ip = 0
-            while (ip < nt) {
-                pl_index++
-                cu = cu * T + pl[pl_index]
-                ip++
-            }
-            sl += cu.mod3600()
-            /* "Latitude" polynomial (theta). */pb_index++
-            cu = pb[pb_index]
-            ip = 0
-            while (ip < nt) {
-                pb_index++
-                cu = cu * T + pb[pb_index]
-                ip++
-            }
-            sb += cu
-            /* Radius polynomial (psi). */
-            pr_index++
-            cu = pr[pr_index]
-            ip = 0
-            while (ip < nt) {
-                pr_index++
-                cu = cu * T + pr[pr_index]
-                ip++
-            }
-            sr += cu
-            continue
-        }
-        k1 = 0
-        cv = 0.0
-        sv = 0.0
-        ip = 0
-        while (ip < np) {
-
-            /* What harmonic. */
-            p_index++
-            j = p[p_index]
-            /* Which planet. */
-            p_index++
-            m = p[p_index] - 1
-            if (j != 0) {
-                k = abs(j) - 1
-                su = ss[m][k] /* sin(k*angle) */
-                if (j < 0) su = -su
-                cu = cc[m][k]
-                if (k1 == 0) { /* set first angle */
-                    sv = su
-                    cv = cu
-                    k1 = 1
-                } else { /* combine angles */
-                    t = su * cv + cu * sv
-                    cv = cu * cv - su * sv
-                    sv = t
-                }
-            }
-            ip++
-        }
-
-        /* Highest power of T. */
-        p_index++
-        nt = p[p_index]
-        /* Longitude. */
-        pl_index++
-        cu = pl[pl_index]
-        pl_index++
-        su = pl[pl_index]
-        ip = 0
-        while (ip < nt) {
-            pl_index++
-            cu = cu * T + pl[pl_index]
-            pl_index++
-            su = su * T + pl[pl_index]
-            ip++
-        }
-        sl += cu * cv + su * sv
-        /* Latitude. */
-        pb_index++
-        cu = pb[pb_index]
-        pb_index++
-        su = pb[pb_index]
-        ip = 0
-        while (ip < nt) {
-            pb_index++
-            cu = cu * T + pb[pb_index]
-            pb_index++
-            su = su * T + pb[pb_index]
-            ip++
-        }
-        sb += cu * cv + su * sv
-        /* Radius. */
-        pr_index++
-        cu = pr[pr_index]
-        pr_index++
-        su = pr[pr_index]
-        ip = 0
-        while (ip < nt) {
-            pr_index++
-            cu = cu * T + pr[pr_index]
-            pr_index++
-            su = su * T + pr[pr_index]
-            ip++
-        }
-        sr += cu * cv + su * sv
-    }
-    if (distance == 0.0) return doubleArrayOf(
-        (ARCSEC_TO_RAD * sl).rad.normalize().value,
-        (ARCSEC_TO_RAD * sb).rad.normalize().value,
-        (ARCSEC_TO_RAD * sr).rad.normalize().value
-    )
-    val pobj = DoubleArray(3)
-    pobj[0] = ARCSEC_TO_RAD * sl
-    pobj[1] = ARCSEC_TO_RAD * sb
-    pobj[2] = distance * (1.0 + ARCSEC_TO_RAD * sr)
-    val x: Double = pobj[2] * cos(pobj[0]) * cos(pobj[1])
-    val y: Double = pobj[2] * sin(pobj[0]) * cos(pobj[1])
-    val z: Double = pobj[2] * sin(pobj[1])
-    return doubleArrayOf(x, y, z)
 }
 
 /**
- * Generic program to accumulate sum of trigonometric series in one
- * variables (e.g., latitude) of the same list of arguments.
+ * Generic program to accumulate sum of trigonometric series in one variable (e.g., latitude) of the same list of arguments.
  *
- * @param J Julian day.
+ * @param tt
  * @param arg_tbl
- * @param distance
  * @param lat_tbl
- * @param lon_tbl
- * @param rad_tbl
  * @param max_harmonic
- * @param max_power_of_t
- * @param maxargs
  * @param timescale
- * @param trunclvl
- * @return Latitude (rad).
+ * @return Latitude (rad)
  */
 internal fun g1plan(
-    tt: JT, arg_tbl: IntArray, lat_tbl: DoubleArray, max_harmonic: IntArray, maxargs: Int, timescale: Double,
-): Double {
-    var i: Int
+    tt: JT, arg_tbl: IntArray, lat_tbl: DoubleArray, max_harmonic: IntArray, timescale: Double,
+): Radian {
     var j: Int
     var k: Int
     var m: Int
-    var k1: Int
-    var ip: Int
+    var buffer: Double
+
     var np: Int
-    var nt: Int
+
     var su: Double
     var cu: Double
-    var sv: Double
-    var cv: Double
-    val T: Double
-    var t: Double
-    var sb: Double
-    val args: DoubleArray = meanElements(tt)
-    T = (tt * JULIAN_DAYS_PER_CENTURY) / timescale
 
+    val args: DoubleArray = getMeanElements(tt)
+
+    val jT100: Double = (tt * JULIAN_DAYS_PER_CENTURY) / timescale
 
     /* Calculate sin( i*MM ), etc. for needed multiple angles. */
     val ss = Array(20) { DoubleArray(41) }
     val cc = Array(20) { DoubleArray(41) }
-    i = 0
-    while (i < maxargs) {
-        if (max_harmonic[i] > 0) {
-            sscc(i, args[i], max_harmonic[i], ss, cc)
-        }
-        i++
-    }
-    sb = 0.0
-    np = 0
-    nt = 0
-    cu = 0.0
-    var p_index = -1
-    var pb_index = -1
+
+    max_harmonic.forEachIndexed { i, harmonic -> if (harmonic > 0) sscc(i, args[i], max_harmonic[i], ss, cc) }
+
+    var sb = 0.0
+    var pIndex = -1
+    var pbIndex = -1
+
+    var count: Int
+
+    var isFirst: Boolean
+
+    var accumulator: Double
+    val arrayAccumulator = doubleArrayOf(0.0, 0.0)
+
     while (true) {
 
         /* argument of sine and cosine */
         /* Number of periodic arguments. */
-        p_index++
-        np = arg_tbl[p_index]
+        np = arg_tbl[++pIndex]
+
         if (np < 0) break
-        if (np == 0) { /* It is a polynomial term. */
-            p_index++
-            nt = arg_tbl[p_index]
-            /* "Latitude" polynomial (theta). */
-            pb_index++
-            cu = lat_tbl[pb_index]
-            ip = 0
-            while (ip < nt) {
-                pb_index++
-                cu = cu * T + lat_tbl[pb_index]
-                ip++
+        if (np == 0) {
+            /* It is a polynomial term. */
+            count = arg_tbl[++pIndex]
+            accumulator = lat_tbl[++pbIndex]
+            for (i in (0 until  count)) {
+                accumulator = accumulator * jT100 + lat_tbl[++pbIndex]
             }
-            sb += cu
+            sb += accumulator
             continue
         }
-        k1 = 0
-        cv = 0.0
-        sv = 0.0
-        ip = 0
-        while (ip < np) {
 
+        isFirst = true
+
+        for (i in (0 until np)) {
             /* What harmonic. */
-            p_index++
-            j = arg_tbl[p_index]
+            j = arg_tbl[++pIndex]
             /* Which planet. */
-            p_index++
-            m = arg_tbl[p_index] - 1
+            m = arg_tbl[++pIndex] - 1
             if (j != 0) {
                 k = abs(j) - 1
                 su = ss[m][k] /* sin(k*angle) */
                 if (j < 0) su = -su
                 cu = cc[m][k]
-                if (k1 == 0) { /* set first angle */
-                    sv = su
-                    cv = cu
-                    k1 = 1
+                if (isFirst) { /* set first angle */
+                    arrayAccumulator[0] = su
+                    arrayAccumulator[1] = cu
+                    isFirst = false
                 } else { /* combine angles */
-                    t = su * cv + cu * sv
-                    cv = cu * cv - su * sv
-                    sv = t
+                    buffer = su * arrayAccumulator[1] + cu * arrayAccumulator[0]
+                    arrayAccumulator[1] = cu * arrayAccumulator[1] - su * arrayAccumulator[0]
+                    arrayAccumulator[0] = buffer
                 }
             }
-            ip++
         }
+        val (sv, cv) = arrayAccumulator
 
-        /* Highest power of T. */p_index++
-        nt = arg_tbl[p_index]
-        /* Latitude. */pb_index++
-        cu = lat_tbl[pb_index].toDouble()
-        pb_index++
-        su = lat_tbl[pb_index].toDouble()
-        ip = 0
-        while (ip < nt) {
-            pb_index++
-            cu = cu * T + lat_tbl[pb_index]
-            pb_index++
-            su = su * T + lat_tbl[pb_index]
-            ip++
+        count = arg_tbl[++pIndex]
+
+        /* Latitude. */
+        arrayAccumulator[0] = lat_tbl[++pbIndex]
+        arrayAccumulator[1] = lat_tbl[++pbIndex]
+        for (i in (0 until count)) {
+            arrayAccumulator[0] = arrayAccumulator[0] * jT100 + lat_tbl[++pbIndex]
+            arrayAccumulator[1] = arrayAccumulator[1] * jT100 + lat_tbl[++pbIndex]
         }
-        sb += cu * cv + su * sv
+        sb += arrayAccumulator.let { it[0] * cv + it[1] * sv }
+
     }
-    return ARCSEC_TO_RAD * sb * 0.0001
+    return (ARCSEC_TO_RAD * sb * 0.0001).rad
 }
 
 /**
  * Generic program to accumulate sum of trigonometric series in two
  * variables (e.g., longitude, radius) of the same list of arguments.
  *
- * @param J Julian day.
+ * @param tt
  * @param arg_tbl
  * @param distance
- * @param lat_tbl
  * @param lon_tbl
  * @param rad_tbl
  * @param max_harmonic
- * @param max_power_of_t
- * @param maxargs
  * @param timescale
- * @param trunclvl
- * @return An array with x, y, z (AU).
+ * @return vector with phi, theta, r (AU).
  */
 internal fun g2plan(
     tt: JT,
     arg_tbl: IntArray,
     distance: Double,
-    lat_tbl: DoubleArray,
     lon_tbl: DoubleArray,
     rad_tbl: DoubleArray,
     max_harmonic: IntArray,
-    max_power_of_t: Int,
-    maxargs: Int,
     timescale: Double,
-    trunclvl: Double,
-    lat: Double
-): DoubleArray {
-    var i: Int
+    lat: Radian
+): SphericalVector {
+
     var j: Int
     var k: Int
     var m: Int
-    var k1: Int
-    var ip: Int
     var np: Int
-    var nt: Int
     var su: Double
     var cu: Double
-    var sv: Double
-    var cv: Double
-    val T: Double
-    var t: Double
-    var sl: Double
-    var sr: Double
+    var buffer: Double
 
-    //TODO https://bitbucket.org/talonsoalbi/jparsec/raw/372f81ebe5e66d530bf89a0ced19ca2fd8570f24/src/main/java/jparsec/ephem/planets/PlanetEphem.java
+    // TODO moon libration
+    if (distance == 0.0) throw IllegalArgumentException()
 
-    T = (tt * JULIAN_DAYS_PER_CENTURY) / timescale
-    val args: DoubleArray = meanElements(tt)
+    val jT100: Double = (tt * JULIAN_DAYS_PER_CENTURY) / timescale
+    val args: DoubleArray = getMeanElements(tt)
+    val lpEquinox = args[13]
 
     /* Calculate sin( i*MM ), etc. for needed multiple angles. */
-    val ss = Array(20) {
-        DoubleArray(
-            41
-        )
-    }
+    val ss = Array(20) { DoubleArray(41) }
     val cc = Array(20) { DoubleArray(41) }
-    i = 0
-    while (i < maxargs) {
-        if (max_harmonic[i] > 0) {
-            sscc(i, args[i], max_harmonic[i], ss, cc)
-        }
-        i++
-    }
-    sl = 0.0
-    sr = 0.0
-    np = 0
-    nt = 0
-    cu = 0.0
-    var p_index = -1
-    var pl_index = -1
-    var pr_index = -1
-    while (true) {
 
+    max_harmonic.forEachIndexed { i, harmonic ->
+        if (harmonic > 0) sscc(i, args[i], max_harmonic[i], ss, cc)
+    }
+
+    val vector = SphericalVector.Zero
+
+    var pIndex = -1
+    var plIndex = -1
+    var prIndex = -1
+
+    var accumulator: Double
+    val arrayAccumulator = doubleArrayOf(0.0, 0.0)
+    var count: Int
+    var isFirst: Boolean
+
+    while (true) {
         /* argument of sine and cosine */
-        /* Number of periodic arguments. */p_index++
-        np = arg_tbl[p_index]
+        /* Number of periodic arguments. */
+        np = arg_tbl[++pIndex]
         if (np < 0) break
-        if (np == 0) { /* It is a polynomial term. */
-            p_index++
-            nt = arg_tbl[p_index]
-            /* "Longitude" polynomial (phi). */pl_index++
-            cu = lon_tbl[pl_index].toDouble()
-            ip = 0
-            while (ip < nt) {
-                pl_index++
-                cu = cu * T + lon_tbl[pl_index]
-                ip++
+        if (np == 0) {
+            /* It is a polynomial term. */
+            count = arg_tbl[++pIndex]
+
+            /* "Longitude" polynomial (phi). */
+            accumulator = lon_tbl[++plIndex]
+            for (i in (0 until count)) {
+                accumulator = accumulator * jT100 + lon_tbl[++plIndex]
             }
-            sl += cu
-            /* Radius polynomial (psi). */pr_index++
-            cu = rad_tbl[pr_index].toDouble()
-            ip = 0
-            while (ip < nt) {
-                pr_index++
-                cu = cu * T + rad_tbl[pr_index]
-                ip++
+            vector.phi += accumulator.rad
+
+            /* Radius polynomial (psi). */
+            accumulator = rad_tbl[++prIndex]
+            for (i in (0 until count)) {
+                accumulator = accumulator * jT100 + rad_tbl[++prIndex]
             }
-            sr += cu
+            vector.r += accumulator
             continue
         }
-        k1 = 0
-        cv = 0.0
-        sv = 0.0
-        ip = 0
-        while (ip < np) {
 
-            /* What harmonic. */p_index++
-            j = arg_tbl[p_index]
-            /* Which planet. */p_index++
-            m = arg_tbl[p_index] - 1
+        isFirst = true
+
+        for (i in (0 until np)) {
+            /* What harmonic. */
+            j = arg_tbl[++pIndex]
+            /* Which planet. */
+            m = arg_tbl[++pIndex] - 1
             if (j != 0) {
                 k = abs(j) - 1
                 su = ss[m][k] /* sin(k*angle) */
                 if (j < 0) su = -su
                 cu = cc[m][k]
-                if (k1 == 0) { /* set first angle */
-                    sv = su
-                    cv = cu
-                    k1 = 1
+                if (isFirst) { /* set first angle */
+                    arrayAccumulator[0] = su
+                    arrayAccumulator[1] = cu
+                    isFirst = false
                 } else { /* combine angles */
-                    t = su * cv + cu * sv
-                    cv = cu * cv - su * sv
-                    sv = t
+                    buffer = su * arrayAccumulator[1] + cu * arrayAccumulator[0]
+                    arrayAccumulator[1] = cu * arrayAccumulator[1] - su * arrayAccumulator[0]
+                    arrayAccumulator[0] = buffer
                 }
             }
-            ip++
         }
 
-        /* Highest power of T. */p_index++
-        nt = arg_tbl[p_index]
-        /* Longitude. */pl_index++
-        cu = lon_tbl[pl_index].toDouble()
-        pl_index++
-        su = lon_tbl[pl_index].toDouble()
-        ip = 0
-        while (ip < nt) {
-            pl_index++
-            cu = cu * T + lon_tbl[pl_index]
-            pl_index++
-            su = su * T + lon_tbl[pl_index]
-            ip++
+        val (sv, cv) = arrayAccumulator
+
+        /* Highest power of T. */
+        count = arg_tbl[++pIndex]
+
+        /* Longitude. */
+        arrayAccumulator[0] = lon_tbl[++plIndex]
+        arrayAccumulator[1] = lon_tbl[++plIndex]
+        for (i in (0 until count)) {
+            arrayAccumulator[0] = arrayAccumulator[0] * jT100 + lon_tbl[++plIndex]
+            arrayAccumulator[1] = arrayAccumulator[1] * jT100 + lon_tbl[++plIndex]
         }
-        sl += cu * cv + su * sv
-        /* Radius. */pr_index++
-        cu = rad_tbl[pr_index].toDouble()
-        pr_index++
-        su = rad_tbl[pr_index].toDouble()
-        ip = 0
-        while (ip < nt) {
-            pr_index++
-            cu = cu * T + rad_tbl[pr_index]
-            pr_index++
-            su = su * T + rad_tbl[pr_index]
-            ip++
+        vector.phi += arrayAccumulator.let { it[0] * cv + it[1] * sv }.rad
+
+        /* Radius. */
+        arrayAccumulator[0] = rad_tbl[++prIndex]
+        arrayAccumulator[1] = rad_tbl[++prIndex]
+        for (i in (0 until count)) {
+            arrayAccumulator[0] = arrayAccumulator[0] * jT100 + rad_tbl[++prIndex]
+            arrayAccumulator[1] = arrayAccumulator[1] * jT100 + rad_tbl[++prIndex]
         }
-        sr += cu * cv + su * sv
+        vector.r += arrayAccumulator.let { it[0] * cv + it[1] * sv }
     }
-    val pobj = DoubleArray(3)
-    sl = sl * 0.0001
-    sr = sr * 0.0001
-    if (distance == 0.0) return doubleArrayOf(
-        ARCSEC_TO_RAD * sl + args[13], //  + PlanetEphem.LP_equinox,
-        lat, ARCSEC_TO_RAD * sr
-    )
-    pobj[0] = ARCSEC_TO_RAD * sl + args[13] //  + PlanetEphem.LP_equinox
-    pobj[1] = lat
-    pobj[2] = distance * (1.0 + ARCSEC_TO_RAD * sr)
-    val x: Double = pobj[2] * cos(pobj[0]) * cos(pobj[1])
-    val y: Double = pobj[2] * sin(pobj[0]) * cos(pobj[1])
-    val z: Double = pobj[2] * sin(pobj[1])
-    return doubleArrayOf(x, y, z)
+    vector.phi *= 0.0001
+    vector.r *= 0.0001
+    // TODO libration angles
+//    if (distance == 0.0) return doubleArrayOf(
+//        ARCSEC_TO_RAD * sl + lpEquinox,
+//        lat, ARCSEC_TO_RAD * sr
+//    )
+
+    vector.phi = (ARCSEC_TO_RAD * vector.phi + lpEquinox).rad
+    vector.theta = lat
+    vector.r = distance * (1.0 + ARCSEC_TO_RAD * vector.r)
+    return vector
 }
 
 /**
@@ -596,311 +483,273 @@ internal fun g2plan(
  * variables (e.g., longitude, latitude, radius) of the same list of
  * arguments.
  *
- * @param J Julian day.
+ * @param tt
  * @param arg_tbl
  * @param distance
  * @param lat_tbl
  * @param lon_tbl
  * @param rad_tbl
  * @param max_harmonic
- * @param max_power_of_t
- * @param maxargs
  * @param timescale
- * @param trunclvl
- * @return An array with x, y, z (AU).
+ * @return An SphericalVector r (AU)
  */
 internal fun g3plan(
     tt: JT, arg_tbl: IntArray, distance: Double, lat_tbl: DoubleArray, lon_tbl: DoubleArray,
-    rad_tbl: DoubleArray, max_harmonic: IntArray, max_power_of_t: Int, maxargs: Int, timescale: Double, trunclvl: Double,
-    libration: Boolean
-): DoubleArray {
-    var i: Int
+    rad_tbl: DoubleArray, max_harmonic: IntArray, timescale: Double, libration: Boolean
+): SphericalVector {
     var j: Int
     var k: Int
     var m: Int
-    var k1: Int
-    var ip: Int
+    var isFirst: Boolean
     var np: Int
-    var nt: Int
     var su: Double
     var cu: Double
-    var sv: Double
-    var cv: Double
-    val T: Double
-    var t: Double
-    var sl: Double
-    var sb: Double
-    var sr: Double
+    var buffer: Double
 
-    T = (tt * JULIAN_DAYS_PER_CENTURY) / timescale
-    val J = T * timescale + JD_2000
+    if (distance == 0.0 || libration) {
+        //TODO libration
+        throw IllegalArgumentException()
+    }
 
-    val args: DoubleArray = meanElements(tt)
-    if (libration) args[13] -= getPA_precession(tt) // Only librations
-//    T = (J - J2000) / timescale
+    val jT = (tt * JULIAN_DAYS_PER_CENTURY) / timescale
+
+    val args: DoubleArray = getMeanElements(tt)
+
+    if (libration) args[13] -= getPrecessionOfEquinox(tt) // Only librations
 
     /* Calculate sin( i*MM ), etc. for needed multiple angles. */
-    val ss = Array(20) {
-        DoubleArray(
-            41
-        )
-    }
+    val ss = Array(20) { DoubleArray(41) }
     val cc = Array(20) { DoubleArray(41) }
-    i = 0
-    while (i < maxargs) {
-        if (max_harmonic[i] > 0) {
-            sscc(i, args[i], max_harmonic[i], ss, cc)
-        }
-        i++
-    }
-    sl = 0.0
-    sb = 0.0
-    sr = 0.0
-    np = 0
-    nt = 0
-    cu = 0.0
-    var p_index = -1
-    var pl_index = -1
-    var pb_index = -1
-    var pr_index = -1
+
+    max_harmonic.forEachIndexed { i, harmonic -> if (harmonic > 0) sscc(i, args[i], max_harmonic[i], ss, cc) }
+
+    var pIndex = -1
+    var plIndex = -1
+    var pbIndex = -1
+    var prIndex = -1
+
+    var accumulator: Double
+    val arrayAccumulator = doubleArrayOf(0.0, 0.0)
+    var count: Int
+
+    val vector = SphericalVector.Zero
     while (true) {
 
         /* argument of sine and cosine */
-        /* Number of periodic arguments. */p_index++
-        np = arg_tbl[p_index]
+        /* Number of periodic arguments. */
+        np = arg_tbl[++pIndex]
         if (np < 0) break
-        if (np == 0) { /* It is a polynomial term. */
-            p_index++
-            nt = arg_tbl[p_index]
-            /* "Longitude" polynomial (phi). */pl_index++
-            cu = lon_tbl[pl_index].toDouble()
-            ip = 0
-            while (ip < nt) {
-                pl_index++
-                cu = cu * T + lon_tbl[pl_index]
-                ip++
+        if (np == 0) {
+
+            /* It is a polynomial term. */
+            count = arg_tbl[++pIndex]
+
+            /* "Longitude" polynomial (phi). */
+            accumulator = lon_tbl[++plIndex]
+            for (i in (0 until count)) {
+                accumulator = accumulator * jT + lon_tbl[++plIndex]
             }
-            sl += cu
-            /* "Latitude" polynomial (theta). */pb_index++
-            cu = lat_tbl[pb_index].toDouble()
-            ip = 0
-            while (ip < nt) {
-                pb_index++
-                cu = cu * T + lat_tbl[pb_index]
-                ip++
+            vector.phi += accumulator.rad
+
+
+            /* "Latitude" polynomial (theta). */
+            accumulator = lat_tbl[++pbIndex]
+            for (i in (0 until count)) {
+                accumulator = accumulator * jT + lat_tbl[++pbIndex]
             }
-            sb += cu
-            /* Radius polynomial (psi). */pr_index++
-            cu = rad_tbl[pr_index].toDouble()
-            ip = 0
-            while (ip < nt) {
-                pr_index++
-                cu = cu * T + rad_tbl[pr_index]
-                ip++
+            vector.theta += accumulator.rad
+
+            /* Radius polynomial (psi). */
+            accumulator = rad_tbl[++prIndex]
+            for (i in (0 until count)) {
+                accumulator = accumulator * jT + rad_tbl[++prIndex]
             }
-            sr += cu
+            vector.r += accumulator
             continue
         }
-        k1 = 0
-        cv = 0.0
-        sv = 0.0
-        ip = 0
-        while (ip < np) {
 
-            /* What harmonic. */p_index++
-            j = arg_tbl[p_index]
-            /* Which planet. */p_index++
-            m = arg_tbl[p_index] - 1
+        isFirst = true
+
+        for (i in (0 until np)) {
+            /* What harmonic. */
+            j = arg_tbl[++pIndex]
+            /* Which planet. */
+            m = arg_tbl[++pIndex] - 1
             if (j != 0) {
                 k = abs(j) - 1
                 su = ss[m][k] /* sin(k*angle) */
                 if (j < 0) su = -su
                 cu = cc[m][k]
-                if (k1 == 0) { /* set first angle */
-                    sv = su
-                    cv = cu
-                    k1 = 1
+                if (isFirst) { /* set first angle */
+                    arrayAccumulator[0] = su
+                    arrayAccumulator[1] = cu
+                    isFirst = false
                 } else { /* combine angles */
-                    t = su * cv + cu * sv
-                    cv = cu * cv - su * sv
-                    sv = t
+                    buffer = su * arrayAccumulator[1] + cu * arrayAccumulator[0]
+                    arrayAccumulator[1] = cu * arrayAccumulator[1] - su * arrayAccumulator[0]
+                    arrayAccumulator[0] = buffer
                 }
             }
-            ip++
         }
+        val (sv, cv) = arrayAccumulator
 
-        /* Highest power of T. */p_index++
-        nt = arg_tbl[p_index]
-        /* Longitude. */pl_index++
-        cu = lon_tbl[pl_index].toDouble()
-        pl_index++
-        su = lon_tbl[pl_index].toDouble()
-        ip = 0
-        while (ip < nt) {
-            pl_index++
-            cu = cu * T + lon_tbl[pl_index]
-            pl_index++
-            su = su * T + lon_tbl[pl_index]
-            ip++
+        /* Highest power of T. */
+        count = arg_tbl[++pIndex]
+
+        /* Longitude. */
+
+        arrayAccumulator[0] = lon_tbl[++plIndex]
+        arrayAccumulator[1] = lon_tbl[++plIndex]
+        for (i in (0 until count)) {
+            arrayAccumulator[0] = arrayAccumulator[0] * jT + lon_tbl[++plIndex]
+            arrayAccumulator[1] = arrayAccumulator[1] * jT + lon_tbl[++plIndex]
         }
-        sl += cu * cv + su * sv
-        /* Latitude. */pb_index++
-        cu = lat_tbl[pb_index].toDouble()
-        pb_index++
-        su = lat_tbl[pb_index].toDouble()
-        ip = 0
-        while (ip < nt) {
-            pb_index++
-            cu = cu * T + lat_tbl[pb_index]
-            pb_index++
-            su = su * T + lat_tbl[pb_index]
-            ip++
+        vector.phi += arrayAccumulator.let { it[0] * cv + it[1] * sv }.rad
+
+        /* Latitude. */
+        arrayAccumulator[0] = lat_tbl[++pbIndex]
+        arrayAccumulator[1] = lat_tbl[++pbIndex]
+        for (i in (0 until count)) {
+            arrayAccumulator[0] = arrayAccumulator[0] * jT + lat_tbl[++pbIndex]
+            arrayAccumulator[1] = arrayAccumulator[1] * jT + lat_tbl[++pbIndex]
         }
-        sb += cu * cv + su * sv
-        /* Radius. */pr_index++
-        cu = rad_tbl[pr_index].toDouble()
-        pr_index++
-        su = rad_tbl[pr_index].toDouble()
-        ip = 0
-        while (ip < nt) {
-            pr_index++
-            cu = cu * T + rad_tbl[pr_index]
-            pr_index++
-            su = su * T + rad_tbl[pr_index]
-            ip++
+        vector.theta += arrayAccumulator.let { it[0] * cv + it[1] * sv }.rad
+
+        /* Radius. */
+        arrayAccumulator[0] = rad_tbl[++prIndex]
+        arrayAccumulator[1] = rad_tbl[++prIndex]
+        for (i in (0 until count)) {
+            arrayAccumulator[0] = arrayAccumulator[0] * jT + rad_tbl[++prIndex]
+            arrayAccumulator[1] = arrayAccumulator[1] * jT + rad_tbl[++prIndex]
         }
-        sr += cu * cv + su * sv
+        vector.r += arrayAccumulator.let { it[0] * cv + it[1] * sv }
+
     }
-    sl = sl * 0.0001
-    sb = sb * 0.0001
-    sr = sr * 0.0001
-    if (distance == 0.0) return doubleArrayOf(
-        ARCSEC_TO_RAD * sl + args[2], // + PlanetEphem.Ea_arcsec,
-        ARCSEC_TO_RAD * sb,
-        ARCSEC_TO_RAD * sr
-    )
-    val pobj = DoubleArray(3)
-    pobj[0] = ARCSEC_TO_RAD * sl + args[2] // + PlanetEphem.Ea_arcsec
-    pobj[1] = ARCSEC_TO_RAD * sb
-    pobj[2] = distance * (1.0 + ARCSEC_TO_RAD * sr)
-    val x: Double = pobj[2] * cos(pobj[0]) * cos(pobj[1])
-    val y: Double = pobj[2] * sin(pobj[0]) * cos(pobj[1])
-    val z: Double = pobj[2] * sin(pobj[1])
-    return doubleArrayOf(x, y, z)
+    vector.phi *= 0.0001
+    vector.theta *= 0.0001
+    vector.r *= 0.0001
+
+    // TODO Libration angles
+//    if (distance == 0.0) return
+//    doubleArrayOf(
+//        ARCSEC_TO_RAD * sl + args[2], // + Ea_arcsec,
+//        ARCSEC_TO_RAD * sb,
+//        ARCSEC_TO_RAD * sr
+//    )
+
+    vector.phi = vector.phi * ARCSEC_TO_RAD + args[2].rad // Ea_rad
+    vector.theta = vector.theta * ARCSEC_TO_RAD
+    vector.r = distance * (1.0 + vector.r * ARCSEC_TO_RAD)
+
+    return vector
 }
 
 /**
  * Obtain mean elements of the planets.
- * @param T Julian centuries
+ * @param jT Julian centuries
  * @return An array with the mean longitudes.
  */
-private fun meanElements(T: JT): DoubleArray {
-    val Args = DoubleArray(20)
+private fun getMeanElements(jT: JT): DoubleArray {
+    val args = DoubleArray(20)
 
-    /** Mean longitudes of planets (Simon et al, 1994) .047" subtracted from
+    /** Mean longitudes of planets (Simon 1994) .047" subtracted from
      * constant term for offset to DE403 origin.
      */
 
     val delta = (-.047 * ARCSEC_TO_RAD).rad
 
-    Args[0] = (getSimonJ2000KeplerElements(KeplerElementsObject.Mercury).getLongitude(T) + delta).value
-    Args[1] = (getSimonJ2000KeplerElements(KeplerElementsObject.Venus).getLongitude(T) + delta).value
-    Args[2] = (getSimonJ2000KeplerElements(KeplerElementsObject.Earth).getLongitude(T) + delta).value
-    Args[3] = (getSimonJ2000KeplerElements(KeplerElementsObject.Mars).getLongitude(T) + delta).value
-    Args[4] = (getSimonJ2000KeplerElements(KeplerElementsObject.Jupiter).getLongitude(T) + delta).value
-    Args[5] = (getSimonJ2000KeplerElements(KeplerElementsObject.Saturn).getLongitude(T) + delta).value
-    Args[6] = (getSimonJ2000KeplerElements(KeplerElementsObject.Uranus).getLongitude(T) + delta).value
-    Args[7] = (getSimonJ2000KeplerElements(KeplerElementsObject.Neptune).getLongitude(T) + delta).value
+    args[0] = (getSimonJ2000KeplerElements(KeplerElementsObject.Mercury).getLongitude(jT) + delta).value
+    args[1] = (getSimonJ2000KeplerElements(KeplerElementsObject.Venus).getLongitude(jT) + delta).value
+    args[2] = (getSimonJ2000KeplerElements(KeplerElementsObject.Earth).getLongitude(jT) + delta).value
+    args[3] = (getSimonJ2000KeplerElements(KeplerElementsObject.Mars).getLongitude(jT) + delta).value
+    args[4] = (getSimonJ2000KeplerElements(KeplerElementsObject.Jupiter).getLongitude(jT) + delta).value
+    args[5] = (getSimonJ2000KeplerElements(KeplerElementsObject.Saturn).getLongitude(jT) + delta).value
+    args[6] = (getSimonJ2000KeplerElements(KeplerElementsObject.Uranus).getLongitude(jT) + delta).value
+    args[7] = (getSimonJ2000KeplerElements(KeplerElementsObject.Neptune).getLongitude(jT) + delta).value
 
     /* Copied from cmoon.c, DE404 version. */
     /* Mean elongation of moon = elongation */
-    Args[9] = getMeanElongationOfMoon(T)
-    Args[10] = getAscendingNode(T)
-    Args[11] = getMeanAnomalyOfSun(T)
-    Args[12] = getMeanAnomalyOfMoon(T)
-    Args[13] = getLongitudeOfMoon(T)
-    Args[14] = getLunarFreeLibrations(T)
-    Args[15] = getLB(T)
-    Args[16] = getLC(T)
-    Args[17] = Args[13] - Args[10]
-    Args[18] = getNB(Args[17], T)
-    return Args
+    args[9] = getMeanElongationOfMoon(jT)
+    args[10] = getAscendingNode(jT)
+    args[11] = getMeanAnomalyOfSun(jT)
+    args[12] = getMeanAnomalyOfMoon(jT)
+    args[13] = getLongitudeOfMoon(jT)
+    args[14] = getLunarFreeLibrations(jT)
+    args[15] = getLB(jT)
+    args[16] = getLC(jT)
+    args[17] = args[13] - args[10]
+    args[18] = getNB(args[17], jT)
+    return args
 }
 
-private fun getMeanElongationOfMoon(T: JT): Double {
-    val T2 = T * T
+private fun getMeanElongationOfMoon(jT: JT): Double {
+    val jT2 = jT * jT
     /* Mean elongation of moon = D */
-    var x = (1.6029616009939659e+09 * T + 1.0722612202445078e+06)
-    x += (((((-3.207663637426e-013 * T + 2.555243317839e-011) * T + 2.560078201452e-009) * T - 3.702060118571e-005) * T + 6.9492746836058421e-03) * T /* D, t^3 */
-            - 6.7352202374457519e+00) * T2; /* D, t^2 */
+    var x = (1.6029616009939659e+09 * jT + 1.0722612202445078e+06)
+    x += (((((-3.207663637426e-013 * jT + 2.555243317839e-011) * jT + 2.560078201452e-009) * jT - 3.702060118571e-005) * jT + 0.006949274683605842) * jT /* D, t^3 */
+            - 6.735220237445752) * jT2 /* D, t^2 */
 
     return ARCSEC_TO_RAD * x
 }
 
-private fun getAscendingNode(T: JT): Double {
-    val T2 = T * T
+internal fun getAscendingNode(jT: JT): Double {
+    val jT2 = jT * jT
     /* Mean distance of moon from its ascending node = F */
-    var x = (1.7395272628437717e+09 * T + 3.3577951412884740e+05);
-    x += (((((4.474984866301e-013 * T + 4.189032191814e-011) * T - 2.790392351314e-009) * T - 2.165750777942e-006) * T - 7.5311878482337989e-04) * T /* F, t^3 */
-            - 1.3117809789650071e+01) * T2; /* F, t^2 */
+    var x = (1.7395272628437717e+09 * jT + 3.3577951412884740e+05)
+    x += (((((4.474984866301e-013 * jT + 4.189032191814e-011) * jT - 2.790392351314e-009) * jT - 2.165750777942e-006) * jT - 7.531187848233799E-4) * jT /* F, t^3 */
+            - 1.3117809789650071e+01) * jT2 /* F, t^2 */
     return ARCSEC_TO_RAD * x
 }
 
-private fun getMeanAnomalyOfSun(T: JT): Double {
+private fun getMeanAnomalyOfSun(jT: JT): Double {
     /* Mean anomaly of sun = l' (J. Laskar) */
-    val T2 = T * T
-    var x = (1.2959658102304320e+08 * T + 1.2871027407441526e+06);
-    x += ((((((((1.62e-20 * T - 1.0390e-17) * T - 3.83508e-15) * T + 4.237343e-13) * T + 8.8555011e-11) * T - 4.77258489e-8) * T - 1.1297037031e-5) * T + 8.7473717367324703e-05) * T - 5.5281306421783094e-01) * T2;
+    val jT2 = jT * jT
+    var x = (1.2959658102304320e+08 * jT + 1.2871027407441526e+06)
+    x += ((((((((1.62e-20 * jT - 1.0390e-17) * jT - 3.83508e-15) * jT + 4.237343e-13) * jT + 8.8555011e-11) * jT - 4.77258489e-8) * jT - 1.1297037031e-5) * jT + 8.74737173673247E-5) * jT - 0.5528130642178309) * jT2
     return ARCSEC_TO_RAD * x
 }
 
-private fun getMeanAnomalyOfMoon(T: JT): Double {
-    val T2 = T * T
-    var x = (1.7179159228846793e+09 * T + 4.8586817465825332e+05);
-    x += (((((-1.755312760154e-012 * T + 3.452144225877e-011) * T - 2.506365935364e-008) * T - 2.536291235258e-004) * T + 5.2099641302735818e-02) * T /* l, t^3 */
-            + 3.1501359071894147e+01) * T2; /* l, t^2 */
+private fun getMeanAnomalyOfMoon(jT: JT): Double {
+    val jT2 = jT * jT
+    var x = (1.7179159228846793e+09 * jT + 485868.1746582533)
+    x += (((((-1.755312760154e-012 * jT + 3.452144225877e-011) * jT - 2.506365935364e-008) * jT - 2.536291235258e-004) * jT + 0.05209964130273582) * jT /* l, t^3 */
+            + 3.1501359071894147e+01) * jT2 /* l, t^2 */
     return ARCSEC_TO_RAD * x
 }
 
-private fun getLongitudeOfMoon(T: JT): Double {
-    val T2 = T * T
+internal fun getLongitudeOfMoon(jT: JT): Double {
+    val jT2 = jT * jT
     /* Mean longitude of moon, re mean ecliptic and equinox of date = L */
-    var x = (1.7325643720442266e+09 * T + 7.8593980921052420e+05);
-    x += (((((7.200592540556e-014 * T + 2.235210987108e-010) * T - 1.024222633731e-008) * T - 6.073960534117e-005) * T + 6.9017248528380490e-03) * T /* L, t^3 */
-            - 5.6550460027471399e+00) * T2; /* L, t^2 */
+    var x = (1.7325643720442266e+09 * jT + 7.8593980921052420e+05)
+    x += (((((7.200592540556e-014 * jT + 2.235210987108e-010) * jT - 1.024222633731e-008) * jT - 6.073960534117e-005) * jT + 6.9017248528380490e-03) * jT /* L, t^3 */
+            - 5.65504600274714) * jT2 /* L, t^2 */
     return ARCSEC_TO_RAD * x
 }
 
-private fun getLunarFreeLibrations(T: JT): Double {
+private fun getLunarFreeLibrations(jT: JT): Double {
     /* Lunar free librations. */
     /* 74.7 years. Denoted W or LA. */
-    val x = (-0.112 * T + 1.73655499e6) * T - 389552.81
+    val x = (-0.112 * jT + 1.73655499e6) * jT - 389552.81
     return ARCSEC_TO_RAD * x
 }
 
-private fun getLB(T: JT): Double {
-    return ARCSEC_TO_RAD * (4.48175409e7 * T + 806045.7);
+private fun getLB(jT: JT): Double {
+    return ARCSEC_TO_RAD * (4.48175409e7 * jT + 806045.7)
 }
 
-private fun getLC(T: JT): Double {
-    return ARCSEC_TO_RAD * (5.36486787e6 * T - 391702.8);
+private fun getLC(jT: JT): Double {
+    return ARCSEC_TO_RAD * (5.36486787e6 * jT - 391702.8)
 }
 
-private fun getNB(lc: Double, T: JT): Double {
-    val x = (((-0.000004 * T + 0.000026) * T + 0.153382) * T - 867.919986) * T + 629543.967373;
+private fun getNB(lc: Double, jT: JT): Double {
+    val x = (((-0.000004 * jT + 0.000026) * jT + 0.153382) * jT - 867.919986) * jT + 629543.967373
+    return lc + ARCSEC_TO_RAD * (3.24e5 - x) - getPrecessionOfEquinox(jT)
+}
 
-    var pA_precession = (((((((((-8.66e-20 * T - 4.759e-17) * T + 2.424e-15) * T + 1.3095e-12) * T + 1.7451e-10) * T - 1.8055e-8) * T - 0.0000235316) * T + 0.000076) * T + 1.105414) * T + 5028.791959) * T;
+private fun getPrecessionOfEquinox(jT: JT): Double {
+    val pAPrecession =
+        (((((((((-8.66e-20 * jT - 4.759e-17) * jT + 2.424e-15) * jT + 1.3095e-12) * jT + 1.7451e-10) * jT - 1.8055e-8) * jT - 0.0000235316) * jT + 0.000076) * jT + 1.105414) * jT + 5028.791959) * jT
     /* Moon's longitude re fixed J2000 equinox. */
-    pA_precession = ARCSEC_TO_RAD * x;
-
-    return lc + ARCSEC_TO_RAD * (3.24e5 - x) - pA_precession
-}
-
-private fun getPA_precession(T: JT): Double {
-    val x = (((-0.000004 * T + 0.000026) * T + 0.153382) * T - 867.919986) * T + 629543.967373;
-
-    var pA_precession = (((((((((-8.66e-20 * T - 4.759e-17) * T + 2.424e-15) * T + 1.3095e-12) * T + 1.7451e-10) * T - 1.8055e-8) * T - 0.0000235316) * T + 0.000076) * T + 1.105414) * T + 5028.791959) * T;
-    /* Moon's longitude re fixed J2000 equinox. */
-    return ARCSEC_TO_RAD * x;
+    return ARCSEC_TO_RAD * pAPrecession
 }
 

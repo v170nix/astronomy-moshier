@@ -22,7 +22,7 @@ package net.arwix.urania.moshier
  * 2000.0 to  2500.0:   0.05  0.01 -0.00   0.01  0.00 -0.00   0.03  0.01 -0.00
  * 2500.0 to  2937.2:   0.07  0.02  0.00   0.02  0.00 -0.00   0.03  0.01 -0.00
  */
-object MoshierEarthMoonBarycenterData : MoshierData() {
+object InnerMoshierEarthMoonBarycenterData : InnerMoshierData() {
     override val tabl by lazy {
         doubleArrayOf(
             -242809.0,

@@ -1,97 +1,120 @@
 package net.arwix.urania.moshier
 
-import net.arwix.urania.core.calendar.MJD
-import net.arwix.urania.core.calendar.mJD
-import net.arwix.urania.core.calendar.toJT
-import net.arwix.urania.core.ephemeris.Epoch
-import net.arwix.urania.core.math.vector.RectangularVector
-import net.arwix.urania.core.math.vector.Vector
+import net.arwix.urania.core.calendar.*
+import net.arwix.urania.core.ephemeris.*
+import net.arwix.urania.core.math.LIGHT_TIME_DAYS_PER_AU
+import net.arwix.urania.core.math.vector.*
+import net.arwix.urania.core.spherical
+import net.arwix.urania.core.transformation.nutation.Nutation
+import net.arwix.urania.core.transformation.nutation.createElements
+import net.arwix.urania.core.transformation.obliquity.Obliquity
+import net.arwix.urania.core.transformation.obliquity.createElements
 import net.arwix.urania.core.transformation.precession.Precession
 import net.arwix.urania.core.transformation.precession.createElements
 
-enum class MoshierId {
-    MARS, Earth
+private val defaultMetadata = Metadata(
+    orbit = Orbit.Heliocentric,
+    plane = Plane.Ecliptic,
+    epoch = Epoch.J2000
+)
+
+enum class MoshierIdBody {
+    MARS, Earth, Moon
 }
 
-fun getHeliocentricEclipticPositionJ2000(mjd: MJD, id: MoshierId): Vector {
+fun getMoonGeocentricEclipticApparentPosition(mjd: MJD): Vector {
+    val moonLat = g1plan(
+        mjd.toJT(),
+        InnerMoshierMoonLatitudeData.args,
+        InnerMoshierMoonLatitudeData.tabl,
+        InnerMoshierMoonLatitudeData.max_harmonic,
+        InnerMoshierMoonLatitudeData.timescale,
+    )
+    val pMoon = g2plan(
+        mjd.toJT(),
+        InnerMoshierMoonLongitudeData.args,
+        InnerMoshierMoonLongitudeData.distance,
+        InnerMoshierMoonLongitudeData.tabl,
+        InnerMoshierMoonLongitudeData.tabr,
+        InnerMoshierMoonLongitudeData.max_harmonic,
+        InnerMoshierMoonLongitudeData.timescale,
+        moonLat
+    )
+    return pMoon
+}
 
-    val result = when (id) {
-        MoshierId.MARS -> {
-            gplan(
-                mjd.toJT(),
-                MoshierMarsData.args,
-                MoshierMarsData.distance,
-                MoshierMarsData.tabb,
-                MoshierMarsData.tabl,
-                MoshierMarsData.tabr,
-                MoshierMarsData.max_harmonic,
-                MoshierMarsData.max_power_of_t,
-                MoshierMarsData.maxargs,
-                MoshierMarsData.timescale,
-                MoshierMarsData.trunclvl
+fun getMoonGeocentricEquatorialJ2000Position(mjd: MJD): Vector {
+    val geoEclipticMoonResult = getMoonGeocentricEclipticApparentPosition(mjd).spherical
+    var delta = geoEclipticMoonResult.r * LIGHT_TIME_DAYS_PER_AU
+    val geoEclipticMoonResult1 = getMoonGeocentricEclipticApparentPosition(mjd - delta.mJD - (38.0 / 60.0 / 60.0 / 24.0).mJD )
+
+    // moon -mjd.toJT() true  J2000 ra 2h 11m 27.08s; lat 10deg 50m 37.1s
+    // moon -mjd.toJT() false J2000 ra 2h 11m 26.82s; lat 10deg 50m 49.8s
+    // moon  mjd.toJT() false J2000 ra 2h 13m 48.81s; lat 11deg 02m 54.8s
+    // moon  mjd.toJT() true  J2000 ra 2h 13m 48.55s; lat 11deg 03m 07.5s
+
+    return geoEclipticMoonResult1
+        .let {
+            EphemerisVector(
+                it,
+                metadata = Metadata(
+                    orbit = Orbit.Geocentric,
+                    plane = Plane.Ecliptic,
+                    epoch = Epoch.Apparent
+                )
             )
         }
-        MoshierId.Earth -> {
-            val p = g3plan(
-                mjd.toJT(),
-                MoshierEarthMoonBarycenterData.args,
-                MoshierEarthMoonBarycenterData.distance,
-                MoshierEarthMoonBarycenterData.tabb,
-                MoshierEarthMoonBarycenterData.tabl,
-                MoshierEarthMoonBarycenterData.tabr,
-                MoshierEarthMoonBarycenterData.max_harmonic,
-                MoshierEarthMoonBarycenterData.max_power_of_t,
-                MoshierEarthMoonBarycenterData.maxargs,
-                MoshierEarthMoonBarycenterData.timescale,
-                MoshierEarthMoonBarycenterData.trunclvl,
-                false
-            )
+        .let {
+            Obliquity.Williams1994.createElements(mjd.toJT()).rotatePlane(it.value , Plane.Equatorial)
+        }
+        .let {
+            Precession.Vondrak2011.createElements(mjd.toJT()).changeEpoch(it, Epoch.J2000)
+        }
 
-            val moonLat = g1plan(
-                mjd.toJT(),
-                MoshierMoonLatitudeData.args,
-                MoshierMoonLatitudeData.tabl,
-                MoshierMoonLatitudeData.max_harmonic,
-                MoshierMoonLatitudeData.maxargs,
-                MoshierMoonLatitudeData.timescale,
-            )
+}
 
-            val pMoon = g2plan(
-                mjd.toJT(),
-                MoshierMoonLongitudeData.args,
-                MoshierMoonLongitudeData.distance,
-                MoshierMoonLongitudeData.tabb,
-                MoshierMoonLongitudeData.tabl,
-                MoshierMoonLongitudeData.tabr,
-                MoshierMoonLongitudeData.max_harmonic,
-                MoshierMoonLongitudeData.max_power_of_t,
-                MoshierMoonLongitudeData.maxargs,
-                MoshierMoonLongitudeData.timescale,
-                MoshierMoonLongitudeData.trunclvl,
-                moonLat
-            )
+fun getMoonGeocentricEquatorialApparentPosition(mjd: MJD): Vector {
+    val geoEclipticMoonResult = getMoonGeocentricEclipticApparentPosition(mjd).spherical
+    val delta = geoEclipticMoonResult.r * LIGHT_TIME_DAYS_PER_AU
+    val geoEclipticMoonResult1 = getMoonGeocentricEclipticApparentPosition(mjd - delta.mJD)
 
-            val pMoonVector = Precession.Williams1994.createElements(mjd.toJT()).changeEpoch(
-                RectangularVector(pMoon), Epoch.J2000
-            )
+//    val deltaMatrix = Matrix.getRotateX((-0.1 * 0.001 * ARCSEC_TO_RAD).rad) *
+//            Matrix.getRotateY((3 * 0.001 * ARCSEC_TO_RAD).rad) *
+//            Matrix.getRotateZ((-5.2 * 0.001 * ARCSEC_TO_RAD).rad)
 
-            val earthMoonRatio = 2.7068700387534E7 / 332946.050895
+    return geoEclipticMoonResult1
 
-            return RectangularVector(p) - pMoonVector * (1.0 / (earthMoonRatio + 1.0))
+        .let {
+            Obliquity.Vondrak2011.createElements(mjd.toJT()).rotatePlane(it, Plane.Equatorial)
+        }
+        .let {
+            Nutation.IAU2006.createElements(mjd.toJT(), Obliquity.Vondrak2011).apply(it, Plane.Equatorial)
+        }
+}
+
+suspend fun getHeliocentricEclipticPositionJ2000(mjd: MJD, id: MoshierIdBody): Vector {
+    return when (id) {
+        MoshierIdBody.MARS -> {
+            MoshierMarsEphemeris(mjd.toJT())
+        }
+        MoshierIdBody.Earth -> {
+            MoshierEarthEphemeris(mjd.toJT()).invoke(mjd.toJT())
+        }
+        MoshierIdBody.Moon -> {
+            MoshierMoonEphemeris(mjd.toJT())
         }
     }
-
-    return RectangularVector(result)
-
 }
 
-fun getGeocentricEclipticPositionJ2000(mjd: MJD, id: MoshierId, lightTime: Double = 0.0): Vector {
+suspend fun getGeocentricEclipticPositionJ2000(mjd: MJD, id: MoshierIdBody, lightTime: Double = 0.0): Vector {
     val helioObject = getHeliocentricEclipticPositionJ2000(mjd - lightTime.mJD, id)
-    val helioEarth = getHeliocentricEclipticPositionJ2000(mjd, MoshierId.Earth)
+    if (id == MoshierIdBody.Moon) return helioObject
 
-    val timeStep = 0.1
-    val helioEarthPlus = getHeliocentricEclipticPositionJ2000(mjd + timeStep.mJD, MoshierId.Earth)
-    val helioEarthVelocity = (helioEarthPlus - helioEarth) / timeStep
+    val helioEarth = getHeliocentricEclipticPositionJ2000(mjd, MoshierIdBody.Earth)
+
+//    val timeStep = 0.1
+//    val helioEarthPlus = getHeliocentricEclipticPositionJ2000(mjd + timeStep.mJD, MoshierId.Earth)
+//    val helioEarthVelocity = (helioEarthPlus - helioEarth) / timeStep
     val geoPosition = -helioEarth + helioObject
     return geoPosition
 }
