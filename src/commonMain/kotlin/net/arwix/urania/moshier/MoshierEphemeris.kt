@@ -1,120 +1,181 @@
 package net.arwix.urania.moshier
 
-import net.arwix.urania.core.calendar.*
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
+import net.arwix.urania.core.calendar.JT
 import net.arwix.urania.core.ephemeris.*
-import net.arwix.urania.core.math.LIGHT_TIME_DAYS_PER_AU
-import net.arwix.urania.core.math.vector.*
-import net.arwix.urania.core.spherical
-import net.arwix.urania.core.transformation.nutation.Nutation
-import net.arwix.urania.core.transformation.nutation.createElements
-import net.arwix.urania.core.transformation.obliquity.Obliquity
-import net.arwix.urania.core.transformation.obliquity.createElements
+import net.arwix.urania.core.math.vector.RectangularVector
+import net.arwix.urania.core.math.vector.Vector
 import net.arwix.urania.core.transformation.precession.Precession
+import net.arwix.urania.core.transformation.precession.PrecessionElements
 import net.arwix.urania.core.transformation.precession.createElements
 
-private val defaultMetadata = Metadata(
-    orbit = Orbit.Heliocentric,
-    plane = Plane.Ecliptic,
-    epoch = Epoch.J2000
-)
-
-enum class MoshierIdBody {
-    MARS, Earth, Moon
+interface MoshierEphemerisJ2000 : MoshierEphemeris {
+    suspend fun fromJ2000ToApparent(jT: JT, body: Vector): Vector
+    override val metadata get() = moshierEphemerisJ2000Metadata
 }
 
-fun getMoonGeocentricEclipticApparentPosition(mjd: MJD): Vector {
-    val moonLat = g1plan(
-        mjd.toJT(),
-        InnerMoshierMoonLatitudeData.args,
-        InnerMoshierMoonLatitudeData.tabl,
-        InnerMoshierMoonLatitudeData.max_harmonic,
-        InnerMoshierMoonLatitudeData.timescale,
+private val moshierEphemerisJ2000Metadata: Metadata by lazy {
+    Metadata(
+        orbit = Orbit.Geocentric,
+        plane = Plane.Equatorial,
+        epoch = Epoch.J2000
     )
-    val pMoon = g2plan(
-        mjd.toJT(),
-        InnerMoshierMoonLongitudeData.args,
-        InnerMoshierMoonLongitudeData.distance,
-        InnerMoshierMoonLongitudeData.tabl,
-        InnerMoshierMoonLongitudeData.tabr,
-        InnerMoshierMoonLongitudeData.max_harmonic,
-        InnerMoshierMoonLongitudeData.timescale,
-        moonLat
+}
+
+interface MoshierEphemerisApparent : MoshierEphemeris {
+    suspend fun fromApparentToJ2000(jT: JT, body: Vector): Vector
+    override val metadata get() = moshierEphemerisApparentMetadata
+}
+
+private val moshierEphemerisApparentMetadata: Metadata by lazy {
+    Metadata(
+        orbit = Orbit.Geocentric,
+        plane = Plane.Equatorial,
+        epoch = Epoch.Apparent
     )
-    return pMoon
 }
 
-fun getMoonGeocentricEquatorialJ2000Position(mjd: MJD): Vector {
-    val geoEclipticMoonResult = getMoonGeocentricEclipticApparentPosition(mjd).spherical
-    var delta = geoEclipticMoonResult.r * LIGHT_TIME_DAYS_PER_AU
-    val geoEclipticMoonResult1 = getMoonGeocentricEclipticApparentPosition(mjd - delta.mJD - (38.0 / 60.0 / 60.0 / 24.0).mJD )
-
-    // moon -mjd.toJT() true  J2000 ra 2h 11m 27.08s; lat 10deg 50m 37.1s
-    // moon -mjd.toJT() false J2000 ra 2h 11m 26.82s; lat 10deg 50m 49.8s
-    // moon  mjd.toJT() false J2000 ra 2h 13m 48.81s; lat 11deg 02m 54.8s
-    // moon  mjd.toJT() true  J2000 ra 2h 13m 48.55s; lat 11deg 03m 07.5s
-
-    return geoEclipticMoonResult1
-        .let {
-            EphemerisVector(
-                it,
-                metadata = Metadata(
-                    orbit = Orbit.Geocentric,
-                    plane = Plane.Ecliptic,
-                    epoch = Epoch.Apparent
-                )
-            )
-        }
-        .let {
-            Obliquity.Williams1994.createElements(mjd.toJT()).rotatePlane(it.value , Plane.Equatorial)
-        }
-        .let {
-            Precession.Vondrak2011.createElements(mjd.toJT()).changeEpoch(it, Epoch.J2000)
-        }
-
+interface MoshierEphemeris : Ephemeris {
+    val moshierId: MoshierId
 }
 
-fun getMoonGeocentricEquatorialApparentPosition(mjd: MJD): Vector {
-    val geoEclipticMoonResult = getMoonGeocentricEclipticApparentPosition(mjd).spherical
-    val delta = geoEclipticMoonResult.r * LIGHT_TIME_DAYS_PER_AU
-    val geoEclipticMoonResult1 = getMoonGeocentricEclipticApparentPosition(mjd - delta.mJD)
-
-//    val deltaMatrix = Matrix.getRotateX((-0.1 * 0.001 * ARCSEC_TO_RAD).rad) *
-//            Matrix.getRotateY((3 * 0.001 * ARCSEC_TO_RAD).rad) *
-//            Matrix.getRotateZ((-5.2 * 0.001 * ARCSEC_TO_RAD).rad)
-
-    return geoEclipticMoonResult1
-
-        .let {
-            Obliquity.Vondrak2011.createElements(mjd.toJT()).rotatePlane(it, Plane.Equatorial)
-        }
-        .let {
-            Nutation.IAU2006.createElements(mjd.toJT(), Obliquity.Vondrak2011).apply(it, Plane.Equatorial)
-        }
+object MoshierSunEphemeris : MoshierEphemeris {
+    override val moshierId: MoshierId = MOSHIER_ID_SUN
+    override val metadata: Metadata = defaultMetadata
+    override suspend fun invoke(jT: JT) = RectangularVector.Zero
 }
 
-suspend fun getHeliocentricEclipticPositionJ2000(mjd: MJD, id: MoshierIdBody): Vector {
-    return when (id) {
-        MoshierIdBody.MARS -> {
-            MoshierMarsEphemeris(mjd.toJT())
-        }
-        MoshierIdBody.Earth -> {
-            MoshierEarthEphemeris(mjd.toJT()).invoke(mjd.toJT())
-        }
-        MoshierIdBody.Moon -> {
-            MoshierMoonEphemeris(mjd.toJT())
-        }
+object MoshierMercuryEphemeris :
+    MoshierEphemeris by MainBodyEphemerisImplementation(MOSHIER_ID_MERCURY, InnerMoshierMercuryData)
+
+object MoshierVenusEphemeris :
+    MoshierEphemeris by MainBodyEphemerisImplementation(MOSHIER_ID_VENUS, InnerMoshierVenusData)
+
+object MoshierMarsEphemeris : MoshierEphemeris by MainBodyEphemerisImplementation(MOSHIER_ID_MARS, InnerMoshierMarsData)
+object MoshierJupiterEphemeris :
+    MoshierEphemeris by MainBodyEphemerisImplementation(MOSHIER_ID_JUPITER, InnerMoshierJupiterData)
+
+object MoshierSaturnEphemeris :
+    MoshierEphemeris by MainBodyEphemerisImplementation(MOSHIER_ID_SATURN, InnerMoshierSaturnData)
+
+object MoshierUranusEphemeris :
+    MoshierEphemeris by MainBodyEphemerisImplementation(MOSHIER_ID_URANUS, InnerMoshierUranusData)
+
+object MoshierNeptuneEphemeris :
+    MoshierEphemeris by MainBodyEphemerisImplementation(MOSHIER_ID_NEPTUNE, InnerMoshierNeptuneData)
+
+object MoshierPlutoEphemeris :
+    MoshierEphemeris by MainBodyEphemerisImplementation(MOSHIER_ID_PLUTO, InnerMoshierPlutoData)
+
+object MoshierEarthMoonBarycenterEphemeris : MoshierEphemeris {
+    override val moshierId: MoshierId = MOSHIER_ID_EARTH_MOON_BARYCENTER
+    override val metadata: Metadata = defaultMetadata
+
+    override suspend fun invoke(jT: JT): Vector {
+        return g3plan(
+            jT,
+            InnerMoshierEarthMoonBarycenterData.args,
+            InnerMoshierEarthMoonBarycenterData.distance,
+            InnerMoshierEarthMoonBarycenterData.tabb,
+            InnerMoshierEarthMoonBarycenterData.tabl,
+            InnerMoshierEarthMoonBarycenterData.tabr,
+            InnerMoshierEarthMoonBarycenterData.max_harmonic,
+            InnerMoshierEarthMoonBarycenterData.timescale,
+            false
+        )
     }
 }
 
-suspend fun getGeocentricEclipticPositionJ2000(mjd: MJD, id: MoshierIdBody, lightTime: Double = 0.0): Vector {
-    val helioObject = getHeliocentricEclipticPositionJ2000(mjd - lightTime.mJD, id)
-    if (id == MoshierIdBody.Moon) return helioObject
+class MoshierEarthEphemeris(
+    private val precessionElements: PrecessionElements,
+    private val earthMoonBarycenterEphemeris: MoshierEarthMoonBarycenterEphemeris = MoshierEarthMoonBarycenterEphemeris,
+    private val moonEphemeris: MoshierMoonEphemeris = MoshierMoonEphemeris
+) : MoshierEphemeris {
 
-    val helioEarth = getHeliocentricEclipticPositionJ2000(mjd, MoshierIdBody.Earth)
+    constructor(
+        precessionJT0: JT,
+        earthMoonBarycenterEphemeris: MoshierEarthMoonBarycenterEphemeris = MoshierEarthMoonBarycenterEphemeris,
+        moonEphemeris: MoshierMoonEphemeris = MoshierMoonEphemeris
+    ) : this(
+        Precession.Williams1994.createElements(precessionJT0),
+        earthMoonBarycenterEphemeris,
+        moonEphemeris
+    )
 
-//    val timeStep = 0.1
-//    val helioEarthPlus = getHeliocentricEclipticPositionJ2000(mjd + timeStep.mJD, MoshierId.Earth)
-//    val helioEarthVelocity = (helioEarthPlus - helioEarth) / timeStep
-    val geoPosition = -helioEarth + helioObject
-    return geoPosition
+    override val moshierId: MoshierId = MOSHIER_ID_EARTH
+
+    init {
+        if (precessionElements.id != Precession.Williams1994) throw IllegalArgumentException()
+    }
+
+    override val metadata: Metadata = defaultMetadata
+
+    override suspend fun invoke(jT: JT): Vector = coroutineScope {
+        val earth = async { earthMoonBarycenterEphemeris(jT) }
+        val moon = async { precessionElements.changeEpoch(moonEphemeris(jT), Epoch.J2000) }
+        earth.await() - moon.await() * (1.0 / (earthMoonRatio + 1.0))
+    }
+
+    private companion object {
+        private const val earthMoonRatio = 2.7068700387534E7 / 332946.050895
+    }
+}
+
+object MoshierMoonEphemeris : MoshierEphemeris {
+    override val moshierId: MoshierId = MOSHIER_ID_MOON
+    override val metadata: Metadata
+        get() = Metadata(
+            orbit = Orbit.Geocentric,
+            plane = Plane.Ecliptic,
+            epoch = Epoch.Apparent
+        )
+
+    override suspend fun invoke(jT: JT): Vector {
+        val moonLat = g1plan(
+            jT,
+            InnerMoshierMoonLatitudeData.args,
+            InnerMoshierMoonLatitudeData.tabl,
+            InnerMoshierMoonLatitudeData.max_harmonic,
+            InnerMoshierMoonLatitudeData.timescale,
+        )
+        return g2plan(
+            jT,
+            InnerMoshierMoonLongitudeData.args,
+            InnerMoshierMoonLongitudeData.distance,
+            InnerMoshierMoonLongitudeData.tabl,
+            InnerMoshierMoonLongitudeData.tabr,
+            InnerMoshierMoonLongitudeData.max_harmonic,
+            InnerMoshierMoonLongitudeData.timescale,
+            moonLat
+        )
+    }
+}
+
+private class MainBodyEphemerisImplementation(
+    override val moshierId: MoshierId,
+    private val data: InnerMoshierData
+) : MoshierEphemeris {
+    override val metadata = defaultMetadata
+
+    override suspend fun invoke(jT: JT): Vector {
+        return gplan(
+            jT,
+            data.args,
+            data.distance,
+            data.tabb,
+            data.tabl,
+            data.tabr,
+            data.max_harmonic,
+            data.timescale
+        )
+    }
+}
+
+private val defaultMetadata by lazy {
+    Metadata(
+        orbit = Orbit.Heliocentric,
+        plane = Plane.Ecliptic,
+        epoch = Epoch.J2000
+    )
 }

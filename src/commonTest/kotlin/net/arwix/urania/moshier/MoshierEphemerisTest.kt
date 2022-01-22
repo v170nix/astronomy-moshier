@@ -4,80 +4,237 @@ import kotlinx.coroutines.test.runTest
 import kotlinx.datetime.LocalDate
 import kotlinx.datetime.TimeZone
 import kotlinx.datetime.atStartOfDayIn
-import net.arwix.urania.core.calendar.JT
 import net.arwix.urania.core.calendar.toJT
-import net.arwix.urania.core.calendar.toMJD
-import net.arwix.urania.core.ephemeris.*
-import net.arwix.urania.core.math.RAD_TO_ARCSEC
-import net.arwix.urania.core.math.angle.*
-import net.arwix.urania.core.math.vector.SphericalVector
-import net.arwix.urania.core.rectangular
+import net.arwix.urania.core.ephemeris.Epoch
+import net.arwix.urania.core.math.angle.toDec
+import net.arwix.urania.core.math.angle.toRA
 import net.arwix.urania.core.spherical
-import net.arwix.urania.core.toDeg
-import net.arwix.urania.core.toRad
-import net.arwix.urania.core.transformation.nutation.Nutation
-import net.arwix.urania.core.transformation.nutation.createElements
-import net.arwix.urania.core.transformation.obliquity.Obliquity
-import net.arwix.urania.core.transformation.obliquity.createElements
-import net.arwix.urania.core.transformation.precession.Precession
-import net.arwix.urania.core.transformation.precession.createElements
 import kotlin.test.Test
 import kotlin.test.assertEquals
 
 class MoshierEphemerisTest {
 
     @Test
-    fun getHeliocentricEclipticPositionJ2000Test() = runTest {
+    fun sunTest() = runTest {
 
-        val mjd = LocalDate(1922, 6, 11).atStartOfDayIn(TimeZone.UTC).toMJD()
+        val jT = LocalDate(2022, 5, 11).atStartOfDayIn(TimeZone.UTC).toJT()
+        val factory = MoshierEphemerisFactory(jT)
 
-        val result = getHeliocentricEclipticPositionJ2000(mjd, MoshierIdBody.MARS).spherical
+        val j2000Ephemeris = factory.createGeocentricEquatorialEphemeris(MoshierSunEphemeris, Epoch.J2000)
+        val j2000Body = j2000Ephemeris.invoke(jT).spherical
 
-        println("lon ${result.phi.toDeg()}")
-        println("lat ${result.theta.toDeg()}")
-        println("distance ${result.r}")
+        assertEquals("3h 10m 13.88s", j2000Body.phi.toRA().toString())
+        assertEquals("17deg 44m 22.0s", j2000Body.theta.toDec().toString())
+        assertEquals(1.00982382016339, j2000Body.r, absoluteTolerance = 1e-7)
 
-        val marsEphemeris = MoshierEphemerisFactory(
-            mjd.toJT(),
-            earthEphemeris = MoshierEarthEphemeris(mjd.toJT())
-        ).createGeocentricEquatorialEphemeris(MoshierMarsEphemeris)
+        val apparentEphemeris = factory.createGeocentricEquatorialEphemeris(MoshierSunEphemeris, Epoch.Apparent)
+        val apparentBody = apparentEphemeris(jT).spherical
 
-        val geoEclipticResult = getGeocentricEclipticPositionJ2000(mjd, MoshierIdBody.MARS, 3.83453362  / 60.0 / 24.0).spherical
-        var geoResult = geoEclipticResult
-            .let {
-                Obliquity.Williams1994.createElements(JT.J2000).rotatePlane(it, Plane.Equatorial)
-            }
-            .spherical
+        assertEquals("3h 11m 27.28s", apparentBody.phi.toRA().toString())
+        assertEquals("17deg 49m 18.3s", apparentBody.theta.toDec().toString())
+        assertEquals(1.00982382016339, apparentBody.r, absoluteTolerance = 1e-5)
+    }
 
-        geoResult = marsEphemeris(mjd.toJT()).spherical
+    @Test
+    fun lunarTest() = runTest {
 
-        println("mars ra ${geoResult.phi.toRA()}")
-        println("mars lat ${geoResult.theta.toDec()}")
-        println("mars distance ${geoResult.r}")
+        val jT = LocalDate(1922, 6, 11).atStartOfDayIn(TimeZone.UTC).toJT()
+        val factory = MoshierEphemerisFactory(jT)
 
-        assertEquals("17h 14m 44.87s", geoResult.phi.toRA().toString())
-        assertEquals("-26deg 1m 43.2s", geoResult.theta.toDec().toString())
-        assertEquals(0.46106149461094065, geoResult.r, absoluteTolerance = 1e-10)
+        val lunarJ2000Ephemeris = factory.createGeocentricEquatorialEphemeris(MoshierMoonEphemeris, Epoch.J2000)
+        val lunarJ2000Body = lunarJ2000Ephemeris(jT).spherical
 
-        val geoMoonResult = getMoonGeocentricEquatorialApparentPosition(mjd).spherical
+        assertEquals("18h 28m 41.91s", lunarJ2000Body.phi.toRA().toString())
+        assertEquals("-18deg 14m 51.4s", lunarJ2000Body.theta.toDec().toString())
+        assertEquals(0.002585104, lunarJ2000Body.r, absoluteTolerance = 1e-7)
 
-        println("moon apparent ra ${geoMoonResult.phi.toRA()}")
-        println("moon apparent lat ${geoMoonResult.theta.toDec()}")
-        println("moon apparent distance ${geoMoonResult.r}")
+        val lunarApparentEphemeris = factory.createGeocentricEquatorialEphemeris(MoshierMoonEphemeris, Epoch.Apparent)
+        val lunarApparentBody = lunarApparentEphemeris(jT).spherical
 
-        assertEquals("18h 24m 10.91s", geoMoonResult.phi.toRA().toString())
-        assertEquals("-18deg 17m 40.2s", geoMoonResult.theta.toDec().toString())
-        assertEquals(0.0025851170027739352, geoMoonResult.r)
+        assertEquals("18h 24m 10.91s", lunarApparentBody.phi.toRA().toString())
+        assertEquals("-18deg 17m 40.2s", lunarApparentBody.theta.toDec().toString())
+        assertEquals(0.002585104, lunarApparentBody.r, absoluteTolerance = 1e-7)
+    }
 
-        val geoMoonJ2000Result = getMoonGeocentricEquatorialJ2000Position(mjd).spherical
+    @Test
+    fun mercuryTest() = runTest {
 
-        println("moon J2000 ra ${geoMoonJ2000Result.phi.toRA()}")
-        println("moon J2000 lat ${geoMoonJ2000Result.theta.toDec()}")
-        println("moon J2000 distance ${geoMoonJ2000Result.r}")
+        val jT = LocalDate(2022, 5, 11).atStartOfDayIn(TimeZone.UTC).toJT()
+        val factory = MoshierEphemerisFactory(jT)
 
-        assertEquals("18h 28m 41.92s", geoMoonJ2000Result.phi.toRA().toString())
-        assertEquals("-18deg 14m 52.1s", geoMoonJ2000Result.theta.toDec().toString())
-        assertEquals(0.0025851042460009704, geoMoonJ2000Result.r)
+        val j2000Ephemeris = factory.createGeocentricEquatorialEphemeris(MoshierMercuryEphemeris, Epoch.J2000)
+        val j2000Body = j2000Ephemeris.invoke(jT).spherical
 
+        assertEquals("4h 9m 1.14s", j2000Body.phi.toRA().toString())
+        assertEquals("22deg 39m 9.4s", j2000Body.theta.toDec().toString())
+        assertEquals(0.6334991, j2000Body.r, absoluteTolerance = 1e-6)
+
+        val apparentEphemeris = factory.createGeocentricEquatorialEphemeris(MoshierMercuryEphemeris, Epoch.Apparent)
+        val apparentBody = apparentEphemeris(jT).spherical
+
+        assertEquals("4h 10m 18.45s", apparentBody.phi.toRA().toString())
+        assertEquals("22deg 42m 35.7s", apparentBody.theta.toDec().toString())
+        assertEquals(0.63349, apparentBody.r, absoluteTolerance = 1e-4)
+    }
+
+    @Test
+    fun venusTest() = runTest {
+
+        val jT = LocalDate(2022, 5, 11).atStartOfDayIn(TimeZone.UTC).toJT()
+        val factory = MoshierEphemerisFactory(jT)
+
+        val j2000Ephemeris = factory.createGeocentricEquatorialEphemeris(MoshierVenusEphemeris, Epoch.J2000)
+        val j2000Body = j2000Ephemeris.invoke(jT).spherical
+
+        assertEquals("0h 36m 36.86s", j2000Body.phi.toRA().toString())
+        assertEquals("2deg 5m 31.2s", j2000Body.theta.toDec().toString())
+        assertEquals(1.07247543362964, j2000Body.r, absoluteTolerance = 1e-6)
+
+        val apparentEphemeris = factory.createGeocentricEquatorialEphemeris(MoshierVenusEphemeris, Epoch.Apparent)
+        val apparentBody = apparentEphemeris(jT).spherical
+
+        assertEquals("0h 37m 43.92s", apparentBody.phi.toRA().toString())
+        assertEquals("2deg 12m 42.8s", apparentBody.theta.toDec().toString())
+        assertEquals(1.07247543362964, apparentBody.r, absoluteTolerance = 1e-4)
+    }
+
+    @Test
+    fun marsTest() = runTest {
+
+        val jT = LocalDate(1922, 6, 11).atStartOfDayIn(TimeZone.UTC).toJT()
+        val factory = MoshierEphemerisFactory(jT)
+
+        val marsJ2000Ephemeris = factory.createGeocentricEquatorialEphemeris(MoshierMarsEphemeris, Epoch.J2000)
+        val marsJ2000Body = marsJ2000Ephemeris.invoke(jT).spherical
+
+        assertEquals("17h 14m 44.87s", marsJ2000Body.phi.toRA().toString())
+        assertEquals("-26deg 1m 43.2s", marsJ2000Body.theta.toDec().toString())
+        assertEquals(0.46106174610382, marsJ2000Body.r, absoluteTolerance = 1e-6)
+
+        val marsApparentTransformBody =
+            (marsJ2000Ephemeris as MoshierEphemerisJ2000).fromJ2000ToApparent(jT, marsJ2000Body).spherical
+
+        assertEquals("17h 9m 58.67s", marsApparentTransformBody.phi.toRA().toString())
+        assertEquals("-25deg 56m 14.6s", marsApparentTransformBody.theta.toDec().toString())
+        assertEquals(0.46106174610382, marsApparentTransformBody.r, absoluteTolerance = 1e-6)
+
+        val marsApparentEphemeris = factory.createGeocentricEquatorialEphemeris(MoshierMarsEphemeris, Epoch.Apparent)
+        val marsApparentBody = marsApparentEphemeris(jT).spherical
+
+        assertEquals("17h 9m 58.67s", marsApparentBody.phi.toRA().toString())
+        assertEquals("-25deg 56m 14.6s", marsApparentBody.theta.toDec().toString())
+        assertEquals(0.46106174610382, marsApparentBody.r, absoluteTolerance = 1e-6)
+
+        val marsJ2000TransformBody =
+            (marsApparentEphemeris as MoshierEphemerisApparent).fromApparentToJ2000(jT, marsApparentBody).spherical
+
+        assertEquals("17h 14m 44.87s", marsJ2000TransformBody.phi.toRA().toString())
+        assertEquals("-26deg 1m 43.2s", marsJ2000TransformBody.theta.toDec().toString())
+        assertEquals(0.46106174610382, marsJ2000TransformBody.r, absoluteTolerance = 1e-6)
+    }
+
+    @Test
+    fun jupiterTest() = runTest {
+
+        val jT = LocalDate(2022, 5, 11).atStartOfDayIn(TimeZone.UTC).toJT()
+        val factory = MoshierEphemerisFactory(jT)
+
+        val j2000Ephemeris = factory.createGeocentricEquatorialEphemeris(MoshierJupiterEphemeris, Epoch.J2000)
+        val j2000Body = j2000Ephemeris.invoke(jT).spherical
+
+        assertEquals("0h 0m 38.88s", j2000Body.phi.toRA().toString())
+        assertEquals("-1deg 7m 35.1s", j2000Body.theta.toDec().toString())
+        assertEquals(5.55341, j2000Body.r, absoluteTolerance = 1e-5)
+
+        val apparentEphemeris = factory.createGeocentricEquatorialEphemeris(MoshierJupiterEphemeris, Epoch.Apparent)
+        val apparentBody = apparentEphemeris(jT).spherical
+
+        assertEquals("0h 1m 45.92s", apparentBody.phi.toRA().toString())
+        assertEquals("-1deg 0m 17.8s", apparentBody.theta.toDec().toString())
+        assertEquals(5.553, apparentBody.r, absoluteTolerance = 1e-3)
+    }
+
+    @Test
+    fun saturnTest() = runTest {
+
+        val jT = LocalDate(2022, 5, 11).atStartOfDayIn(TimeZone.UTC).toJT()
+        val factory = MoshierEphemerisFactory(jT)
+
+        val j2000Ephemeris = factory.createGeocentricEquatorialEphemeris(MoshierSaturnEphemeris, Epoch.J2000)
+        val j2000Body = j2000Ephemeris.invoke(jT).spherical
+
+        assertEquals("21h 48m 23.94s", j2000Body.phi.toRA().toString())
+        assertEquals("-14deg 21m 51.0s", j2000Body.theta.toDec().toString())
+        assertEquals(9.91839192988159, j2000Body.r, absoluteTolerance = 1e-6)
+
+        val apparentEphemeris = factory.createGeocentricEquatorialEphemeris(MoshierSaturnEphemeris, Epoch.Apparent)
+        val apparentBody = apparentEphemeris(jT).spherical
+
+        assertEquals("21h 49m 35.81s", apparentBody.phi.toRA().toString())
+        assertEquals("-14deg 15m 42.3s", apparentBody.theta.toDec().toString())
+        assertEquals(9.91839192988159, apparentBody.r, absoluteTolerance = 1e-3)
+    }
+
+    @Test
+    fun uranusTest() = runTest {
+
+        val jT = LocalDate(2022, 5, 11).atStartOfDayIn(TimeZone.UTC).toJT()
+        val factory = MoshierEphemerisFactory(jT)
+
+        val j2000Ephemeris = factory.createGeocentricEquatorialEphemeris(MoshierUranusEphemeris, Epoch.J2000)
+        val j2000Body = j2000Ephemeris.invoke(jT).spherical
+
+        assertEquals("2h 49m 52.38s", j2000Body.phi.toRA().toString())
+        assertEquals("15deg 56m 17.1s", j2000Body.theta.toDec().toString())
+        assertEquals(20.7097944761007, j2000Body.r, absoluteTolerance = 1e-5)
+
+        val apparentEphemeris = factory.createGeocentricEquatorialEphemeris(MoshierUranusEphemeris, Epoch.Apparent)
+        val apparentBody = apparentEphemeris(jT).spherical
+
+        assertEquals("2h 51m 4.53s", apparentBody.phi.toRA().toString())
+        assertEquals("16deg 1m 40.4s", apparentBody.theta.toDec().toString())
+        assertEquals(20.7097944761007, apparentBody.r, absoluteTolerance = 1e-3)
+    }
+
+    @Test
+    fun neptuneTest() = runTest {
+
+        val jT = LocalDate(2022, 5, 11).atStartOfDayIn(TimeZone.UTC).toJT()
+        val factory = MoshierEphemerisFactory(jT)
+
+        val j2000Ephemeris = factory.createGeocentricEquatorialEphemeris(MoshierNeptuneEphemeris, Epoch.J2000)
+        val j2000Body = j2000Ephemeris.invoke(jT).spherical
+
+        assertEquals("23h 41m 41.92s", j2000Body.phi.toRA().toString())
+        assertEquals("-3deg 13m 35.4s", j2000Body.theta.toDec().toString())
+        assertEquals(30.4782075560213, j2000Body.r, absoluteTolerance = 1e-4)
+
+        val apparentEphemeris = factory.createGeocentricEquatorialEphemeris(MoshierNeptuneEphemeris, Epoch.Apparent)
+        val apparentBody = apparentEphemeris(jT).spherical
+
+        assertEquals("23h 42m 49.19s", apparentBody.phi.toRA().toString())
+        assertEquals("-3deg 6m 19.2s", apparentBody.theta.toDec().toString())
+        assertEquals(30.4782075560213, apparentBody.r, absoluteTolerance = 1e-2)
+    }
+
+    @Test
+    fun plutoTest() = runTest {
+
+        val jT = LocalDate(2022, 5, 11).atStartOfDayIn(TimeZone.UTC).toJT()
+        val factory = MoshierEphemerisFactory(jT)
+
+        val j2000Ephemeris = factory.createGeocentricEquatorialEphemeris(MoshierPlutoEphemeris, Epoch.J2000)
+        val j2000Body = j2000Ephemeris.invoke(jT).spherical
+
+        assertEquals("20h 3m 11.26s", j2000Body.phi.toRA().toString())
+        assertEquals("-22deg 27m 23.6s", j2000Body.theta.toDec().toString())
+        assertEquals(34.1337376442542, j2000Body.r, absoluteTolerance = 1e-4)
+
+        val apparentEphemeris = factory.createGeocentricEquatorialEphemeris(MoshierPlutoEphemeris, Epoch.Apparent)
+        val apparentBody = apparentEphemeris(jT).spherical
+
+        assertEquals("20h 4m 30.13s", apparentBody.phi.toRA().toString())
+        assertEquals("-22deg 23m 38.7s", apparentBody.theta.toDec().toString())
+        assertEquals(34.1337376442542, apparentBody.r, absoluteTolerance = 1e-2)
     }
 }
