@@ -32,8 +32,12 @@ class MoshierEphemerisFactory(
     private val nutation: NutationElements = Nutation.IAU1980.createElements(precessionJT, Obliquity.Williams1994)
 ) {
 
+    private val pnMatrix by lazy {
+        nutation.eclipticMatrix * precession.fromJ2000Matrix
+    }
+
     private val pnoMatrix by lazy {
-        obliquity.eclipticToEquatorialMatrix * nutation.eclipticMatrix * precession.fromJ2000Matrix
+        obliquity.eclipticToEquatorialMatrix * pnMatrix
     }
 
     private val pnoTransposeMatrix by lazy {
@@ -75,7 +79,8 @@ class MoshierEphemerisFactory(
 
     fun createGeocentricEquatorialEphemeris(
         bodyEphemeris: MoshierEphemeris,
-        epoch: Epoch
+        epoch: Epoch,
+        plane: Plane
     ): MoshierEphemeris = when (epoch) {
         Epoch.J2000 -> when (bodyEphemeris.moshierId) {
 
@@ -103,11 +108,11 @@ class MoshierEphemerisFactory(
                         val geoBody = body.await()
                         val oneWayDown = geoBody.spherical.r * LIGHT_TIME_DAYS_PER_AU
                         val bodyVelocity = bodyEphemeris.getVelocity(geoBody, jT)
-
-                        return@coroutineScope (geoBody - bodyVelocity * oneWayDown)
+                        val result = (geoBody - bodyVelocity * oneWayDown)
                             .let { precession.changeEpoch(it, Epoch.J2000) }
                             .let { (it + (-earthVelocity.await()) * oneWayDown) }
-                            .let { obliquityJ2000.rotatePlane(it, Plane.Equatorial) }
+                        if (plane == Plane.Ecliptic) return@coroutineScope result
+                        obliquityJ2000.rotatePlane(result, Plane.Equatorial)
                     }
                 }
             }
@@ -126,9 +131,9 @@ class MoshierEphemerisFactory(
                         val geoBody = body.await() - earth.await()
                         val oneWayDown = geoBody.spherical.r * LIGHT_TIME_DAYS_PER_AU
                         val bodyVelocity = bodyEphemeris.getVelocity(body.await(), jT)
-
-                        return@coroutineScope (geoBody - bodyVelocity * oneWayDown)
-                            .let { obliquityJ2000.rotatePlane(it, Plane.Equatorial) }
+                        val result = (geoBody - bodyVelocity * oneWayDown)
+                        if (plane == Plane.Ecliptic) return@coroutineScope result
+                        obliquityJ2000.rotatePlane(result, Plane.Equatorial)
                     }
 
                 }
@@ -156,8 +161,8 @@ class MoshierEphemerisFactory(
                         val moon = bodyEphemeris(jT)
                         val oneWayDown = moon.spherical.r * LIGHT_TIME_DAYS_PER_AU
                         val moonVelocity = bodyEphemeris.getVelocity(moon, jT)
-
-                        return@coroutineScope noMatrix * (moon - moonVelocity * oneWayDown)
+                        val matrix = if (plane == Plane.Equatorial) noMatrix else nutation.eclipticMatrix
+                        return@coroutineScope matrix * (moon - moonVelocity * oneWayDown)
                     }
                 }
             }
@@ -181,8 +186,8 @@ class MoshierEphemerisFactory(
                         val earthVelocity = async(dispatcher) { earthEphemeris.getVelocity(earth.await(), jT) }
 
                         val oneWayBody = geoBody + (earthVelocity.await() - bodyVelocity.await()) * oneWayDown
-
-                        return@coroutineScope pnoMatrix * oneWayBody
+                        val matrix = if (plane == Plane.Equatorial) pnoMatrix else pnMatrix
+                        return@coroutineScope matrix * oneWayBody
                     }
 
                 }
