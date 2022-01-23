@@ -77,7 +77,7 @@ class MoshierEphemerisFactory(
             .let { obliquityJ2000.rotatePlane(it, Plane.Equatorial) }
     }
 
-    fun createGeocentricEquatorialEphemeris(
+    fun createGeocentricEphemeris(
         bodyEphemeris: MoshierEphemeris,
         epoch: Epoch,
         plane: Plane

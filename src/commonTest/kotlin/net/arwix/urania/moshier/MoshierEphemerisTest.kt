@@ -22,7 +22,7 @@ class MoshierEphemerisTest {
         val factory = MoshierEphemerisFactory(jT)
 
         val j2000Ephemeris =
-            factory.createGeocentricEquatorialEphemeris(MoshierSunEphemeris, Epoch.J2000, Plane.Equatorial)
+            factory.createGeocentricEphemeris(MoshierSunEphemeris, Epoch.J2000, Plane.Equatorial)
         val j2000Body = j2000Ephemeris.invoke(jT).spherical
 
         assertEquals("3h 10m 13.88s", j2000Body.phi.toRA().toString())
@@ -30,7 +30,7 @@ class MoshierEphemerisTest {
         assertEquals(1.00982382016339, j2000Body.r, absoluteTolerance = 1e-7)
 
         val apparentEphemeris =
-            factory.createGeocentricEquatorialEphemeris(MoshierSunEphemeris, Epoch.Apparent, Plane.Equatorial)
+            factory.createGeocentricEphemeris(MoshierSunEphemeris, Epoch.Apparent, Plane.Equatorial)
         val apparentBody = apparentEphemeris(jT).spherical
 
         assertEquals("3h 11m 27.28s", apparentBody.phi.toRA().toString())
@@ -45,7 +45,7 @@ class MoshierEphemerisTest {
         val factory = MoshierEphemerisFactory(jT)
 
         val lunarJ2000Ephemeris =
-            factory.createGeocentricEquatorialEphemeris(MoshierMoonEphemeris, Epoch.J2000, Plane.Equatorial)
+            factory.createGeocentricEphemeris(MoshierMoonEphemeris, Epoch.J2000, Plane.Equatorial)
         val lunarJ2000Body = lunarJ2000Ephemeris(jT).spherical
 
         assertEquals("18h 28m 41.91s", lunarJ2000Body.phi.toRA().toString())
@@ -53,7 +53,7 @@ class MoshierEphemerisTest {
         assertEquals(0.002585104, lunarJ2000Body.r, absoluteTolerance = 1e-7)
 
         val lunarApparentEphemeris =
-            factory.createGeocentricEquatorialEphemeris(MoshierMoonEphemeris, Epoch.Apparent, Plane.Equatorial)
+            factory.createGeocentricEphemeris(MoshierMoonEphemeris, Epoch.Apparent, Plane.Equatorial)
         val lunarApparentBody = lunarApparentEphemeris(jT).spherical
 
         assertEquals("18h 24m 10.91s", lunarApparentBody.phi.toRA().toString())
@@ -68,7 +68,7 @@ class MoshierEphemerisTest {
         val factory = MoshierEphemerisFactory(jT)
 
         val j2000Ephemeris =
-            factory.createGeocentricEquatorialEphemeris(MoshierMercuryEphemeris, Epoch.J2000, Plane.Equatorial)
+            factory.createGeocentricEphemeris(MoshierMercuryEphemeris, Epoch.J2000, Plane.Equatorial)
         val j2000Body = j2000Ephemeris.invoke(jT).spherical
 
         assertEquals("4h 9m 1.14s", j2000Body.phi.toRA().toString())
@@ -76,7 +76,7 @@ class MoshierEphemerisTest {
         assertEquals(0.6334991, j2000Body.r, absoluteTolerance = 1e-6)
 
         val apparentEphemeris =
-            factory.createGeocentricEquatorialEphemeris(MoshierMercuryEphemeris, Epoch.Apparent, Plane.Equatorial)
+            factory.createGeocentricEphemeris(MoshierMercuryEphemeris, Epoch.Apparent, Plane.Equatorial)
         val apparentBody = apparentEphemeris(jT).spherical
 
         assertEquals("4h 10m 18.45s", apparentBody.phi.toRA().toString())
@@ -91,7 +91,7 @@ class MoshierEphemerisTest {
         val factory = MoshierEphemerisFactory(jT)
 
         val j2000Ephemeris =
-            factory.createGeocentricEquatorialEphemeris(MoshierVenusEphemeris, Epoch.J2000, Plane.Equatorial)
+            factory.createGeocentricEphemeris(MoshierVenusEphemeris, Epoch.J2000, Plane.Equatorial)
         val j2000Body = j2000Ephemeris.invoke(jT).spherical
 
         assertEquals("0h 36m 36.86s", j2000Body.phi.toRA().toString())
@@ -99,7 +99,7 @@ class MoshierEphemerisTest {
         assertEquals(1.07247543362964, j2000Body.r, absoluteTolerance = 1e-6)
 
         val apparentEphemeris =
-            factory.createGeocentricEquatorialEphemeris(MoshierVenusEphemeris, Epoch.Apparent, Plane.Equatorial)
+            factory.createGeocentricEphemeris(MoshierVenusEphemeris, Epoch.Apparent, Plane.Equatorial)
         val apparentBody = apparentEphemeris(jT).spherical
 
         assertEquals("0h 37m 43.92s", apparentBody.phi.toRA().toString())
@@ -114,7 +114,7 @@ class MoshierEphemerisTest {
         val factory = MoshierEphemerisFactory(jT)
 
         val marsJ2000Ephemeris =
-            factory.createGeocentricEquatorialEphemeris(MoshierMarsEphemeris, Epoch.J2000, Plane.Equatorial)
+            factory.createGeocentricEphemeris(MoshierMarsEphemeris, Epoch.J2000, Plane.Equatorial)
         val marsJ2000Body = marsJ2000Ephemeris.invoke(jT).spherical
 
         assertEquals("17h 14m 44.87s", marsJ2000Body.phi.toRA().toString())
@@ -129,7 +129,7 @@ class MoshierEphemerisTest {
         assertEquals(0.46106174610382, marsApparentTransformBody.r, absoluteTolerance = 1e-6)
 
         val marsApparentEphemeris =
-            factory.createGeocentricEquatorialEphemeris(MoshierMarsEphemeris, Epoch.Apparent, Plane.Equatorial)
+            factory.createGeocentricEphemeris(MoshierMarsEphemeris, Epoch.Apparent, Plane.Equatorial)
         val marsApparentBody = marsApparentEphemeris(jT).spherical
 
         assertEquals("17h 9m 58.67s", marsApparentBody.phi.toRA().toString())
@@ -151,7 +151,7 @@ class MoshierEphemerisTest {
         val factory = MoshierEphemerisFactory(jT)
 
         val j2000Ephemeris =
-            factory.createGeocentricEquatorialEphemeris(MoshierJupiterEphemeris, Epoch.J2000, Plane.Equatorial)
+            factory.createGeocentricEphemeris(MoshierJupiterEphemeris, Epoch.J2000, Plane.Equatorial)
         val j2000Body = j2000Ephemeris.invoke(jT).spherical
 
         assertEquals("0h 0m 38.88s", j2000Body.phi.toRA().toString())
@@ -159,7 +159,7 @@ class MoshierEphemerisTest {
         assertEquals(5.55341, j2000Body.r, absoluteTolerance = 1e-5)
 
         val apparentEphemeris =
-            factory.createGeocentricEquatorialEphemeris(MoshierJupiterEphemeris, Epoch.Apparent, Plane.Equatorial)
+            factory.createGeocentricEphemeris(MoshierJupiterEphemeris, Epoch.Apparent, Plane.Equatorial)
         val apparentBody = apparentEphemeris(jT).spherical
 
         assertEquals("0h 1m 45.92s", apparentBody.phi.toRA().toString())
@@ -174,7 +174,7 @@ class MoshierEphemerisTest {
         val factory = MoshierEphemerisFactory(jT)
 
         val j2000Ephemeris =
-            factory.createGeocentricEquatorialEphemeris(MoshierSaturnEphemeris, Epoch.J2000, Plane.Equatorial)
+            factory.createGeocentricEphemeris(MoshierSaturnEphemeris, Epoch.J2000, Plane.Equatorial)
         val j2000Body = j2000Ephemeris.invoke(jT).spherical
 
         assertEquals("21h 48m 23.94s", j2000Body.phi.toRA().toString())
@@ -182,7 +182,7 @@ class MoshierEphemerisTest {
         assertEquals(9.91839192988159, j2000Body.r, absoluteTolerance = 1e-6)
 
         val apparentEphemeris =
-            factory.createGeocentricEquatorialEphemeris(MoshierSaturnEphemeris, Epoch.Apparent, Plane.Equatorial)
+            factory.createGeocentricEphemeris(MoshierSaturnEphemeris, Epoch.Apparent, Plane.Equatorial)
         val apparentBody = apparentEphemeris(jT).spherical
 
         assertEquals("21h 49m 35.81s", apparentBody.phi.toRA().toString())
@@ -197,7 +197,7 @@ class MoshierEphemerisTest {
         val factory = MoshierEphemerisFactory(jT)
 
         val j2000Ephemeris =
-            factory.createGeocentricEquatorialEphemeris(MoshierUranusEphemeris, Epoch.J2000, Plane.Equatorial)
+            factory.createGeocentricEphemeris(MoshierUranusEphemeris, Epoch.J2000, Plane.Equatorial)
         val j2000Body = j2000Ephemeris.invoke(jT).spherical
 
         assertEquals("2h 49m 52.38s", j2000Body.phi.toRA().toString())
@@ -205,7 +205,7 @@ class MoshierEphemerisTest {
         assertEquals(20.7097944761007, j2000Body.r, absoluteTolerance = 1e-5)
 
         val apparentEphemeris =
-            factory.createGeocentricEquatorialEphemeris(MoshierUranusEphemeris, Epoch.Apparent, Plane.Equatorial)
+            factory.createGeocentricEphemeris(MoshierUranusEphemeris, Epoch.Apparent, Plane.Equatorial)
         val apparentBody = apparentEphemeris(jT).spherical
 
         assertEquals("2h 51m 4.53s", apparentBody.phi.toRA().toString())
@@ -220,7 +220,7 @@ class MoshierEphemerisTest {
         val factory = MoshierEphemerisFactory(jT)
 
         val j2000Ephemeris =
-            factory.createGeocentricEquatorialEphemeris(MoshierNeptuneEphemeris, Epoch.J2000, Plane.Equatorial)
+            factory.createGeocentricEphemeris(MoshierNeptuneEphemeris, Epoch.J2000, Plane.Equatorial)
         val j2000Body = j2000Ephemeris.invoke(jT).spherical
 
         assertEquals("23h 41m 41.92s", j2000Body.phi.toRA().toString())
@@ -228,7 +228,7 @@ class MoshierEphemerisTest {
         assertEquals(30.4782075560213, j2000Body.r, absoluteTolerance = 1e-4)
 
         val apparentEphemeris =
-            factory.createGeocentricEquatorialEphemeris(MoshierNeptuneEphemeris, Epoch.Apparent, Plane.Equatorial)
+            factory.createGeocentricEphemeris(MoshierNeptuneEphemeris, Epoch.Apparent, Plane.Equatorial)
         val apparentBody = apparentEphemeris(jT).spherical
 
         assertEquals("23h 42m 49.19s", apparentBody.phi.toRA().toString())
@@ -243,7 +243,7 @@ class MoshierEphemerisTest {
         val factory = MoshierEphemerisFactory(jT)
 
         val j2000Ephemeris =
-            factory.createGeocentricEquatorialEphemeris(MoshierPlutoEphemeris, Epoch.J2000, Plane.Equatorial)
+            factory.createGeocentricEphemeris(MoshierPlutoEphemeris, Epoch.J2000, Plane.Equatorial)
         val j2000Body = j2000Ephemeris.invoke(jT).spherical
 
         assertEquals("20h 3m 11.26s", j2000Body.phi.toRA().toString())
@@ -251,7 +251,7 @@ class MoshierEphemerisTest {
         assertEquals(34.1337376442542, j2000Body.r, absoluteTolerance = 1e-4)
 
         val apparentEphemeris =
-            factory.createGeocentricEquatorialEphemeris(MoshierPlutoEphemeris, Epoch.Apparent, Plane.Equatorial)
+            factory.createGeocentricEphemeris(MoshierPlutoEphemeris, Epoch.Apparent, Plane.Equatorial)
         val apparentBody = apparentEphemeris(jT).spherical
 
         assertEquals("20h 4m 30.13s", apparentBody.phi.toRA().toString())
