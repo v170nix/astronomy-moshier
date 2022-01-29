@@ -3,7 +3,7 @@ package net.arwix.urania.moshier
 import net.arwix.urania.core.calendar.JT
 import net.arwix.urania.core.calendar.times
 import net.arwix.urania.core.kepler.KeplerElementsObject
-import net.arwix.urania.core.kepler.getSimonJ2000KeplerElements
+import net.arwix.urania.core.kepler.getKeplerElementsSimonJ2000
 import net.arwix.urania.core.math.ARCSEC_TO_RAD
 import net.arwix.urania.core.math.JULIAN_DAYS_PER_CENTURY
 import net.arwix.urania.core.math.angle.Radian
@@ -658,14 +658,14 @@ private fun getMeanElements(jT: JT): DoubleArray {
 
     val delta = (-.047 * ARCSEC_TO_RAD).rad
 
-    args[0] = (getSimonJ2000KeplerElements(KeplerElementsObject.Mercury).getLongitude(jT) + delta).value
-    args[1] = (getSimonJ2000KeplerElements(KeplerElementsObject.Venus).getLongitude(jT) + delta).value
-    args[2] = (getSimonJ2000KeplerElements(KeplerElementsObject.Earth).getLongitude(jT) + delta).value
-    args[3] = (getSimonJ2000KeplerElements(KeplerElementsObject.Mars).getLongitude(jT) + delta).value
-    args[4] = (getSimonJ2000KeplerElements(KeplerElementsObject.Jupiter).getLongitude(jT) + delta).value
-    args[5] = (getSimonJ2000KeplerElements(KeplerElementsObject.Saturn).getLongitude(jT) + delta).value
-    args[6] = (getSimonJ2000KeplerElements(KeplerElementsObject.Uranus).getLongitude(jT) + delta).value
-    args[7] = (getSimonJ2000KeplerElements(KeplerElementsObject.Neptune).getLongitude(jT) + delta).value
+    args[0] = (getKeplerElementsSimonJ2000(KeplerElementsObject.Mercury).getLongitude(jT) + delta).value
+    args[1] = (getKeplerElementsSimonJ2000(KeplerElementsObject.Venus).getLongitude(jT) + delta).value
+    args[2] = (getKeplerElementsSimonJ2000(KeplerElementsObject.Earth).getLongitude(jT) + delta).value
+    args[3] = (getKeplerElementsSimonJ2000(KeplerElementsObject.Mars).getLongitude(jT) + delta).value
+    args[4] = (getKeplerElementsSimonJ2000(KeplerElementsObject.Jupiter).getLongitude(jT) + delta).value
+    args[5] = (getKeplerElementsSimonJ2000(KeplerElementsObject.Saturn).getLongitude(jT) + delta).value
+    args[6] = (getKeplerElementsSimonJ2000(KeplerElementsObject.Uranus).getLongitude(jT) + delta).value
+    args[7] = (getKeplerElementsSimonJ2000(KeplerElementsObject.Neptune).getLongitude(jT) + delta).value
 
     /* Copied from cmoon.c, DE404 version. */
     /* Mean elongation of moon = elongation */
