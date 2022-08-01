@@ -4,11 +4,12 @@ plugins {
 }
 
 group = "net.arwix.urania"
-version = "1.0.0-alpha21"
+version = "1.0.0-alpha22"
 
 repositories {
     mavenCentral()
     mavenLocal()
+    maven(url = "https://jitpack.io")
 }
 
 kotlin {
@@ -40,7 +41,7 @@ kotlin {
             dependencies {
                 implementation(kotlin("stdlib-common"))
                 implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.6.4")
-                implementation("net.arwix.urania:astronomy-core:1.0.0-alpha21")
+                implementation("com.github.v170nix.astronomy-core:astronomy-core:1.0.0-alpha22")
             }
         }
         val commonTest by getting {
